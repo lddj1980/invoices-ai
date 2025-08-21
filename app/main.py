@@ -1,7 +1,15 @@
+import io
+import os
+import tempfile
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from typing import Dict, List
 
 from .agents import identify_field, select_relevant_chunks
+
+try:  # pragma: no cover - handled via tests
+    from PyPDF2 import PdfReader
+except Exception:  # pragma: no cover
+    PdfReader = None
 
 app = FastAPI()
 
@@ -36,15 +44,62 @@ FIELD_RULES: Dict[str, str] = {
 }
 
 
+def _extract_text(content: bytes, filename: str) -> str:
+    """Extract text from ``content`` using PDF parsing or OCR.
+
+    For PDFs the function first attempts :class:`PyPDF2.PdfReader`. When no text
+    is found it falls back to :mod:`paddleocr`. Non-PDF files are decoded as
+    UTF-8 text.
+    """
+
+    if filename.lower().endswith(".pdf"):
+        if PdfReader is not None:
+            try:
+                reader = PdfReader(io.BytesIO(content))
+                text = "".join(
+                    page.extract_text() or "" for page in reader.pages
+                ).strip()
+                if text:
+                    return text
+            except Exception:
+                pass
+
+        try:
+            from paddleocr import PaddleOCR  # imported lazily
+
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                tmp.write(content)
+                tmp_path = tmp.name
+
+            try:
+                ocr = PaddleOCR(use_angle_cls=True, lang="pt")
+                result = ocr.ocr(tmp_path)
+            finally:
+                os.remove(tmp_path)
+
+            text = "\n".join(
+                " ".join(line[1][0] for line in page)
+                for page in result
+                if page
+            ).strip()
+            if text:
+                return text
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Unable to extract text") from exc
+
+        raise HTTPException(status_code=400, detail="Unable to extract text from PDF")
+
+    try:
+        return content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid file encoding") from exc
+
+
 @app.post("/invoices")
 async def upload_invoice(file: UploadFile = File(...)):
     """Upload an invoice and extract relevant fields using RAG."""
-
     content = await file.read()
-    try:
-        text = content.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise HTTPException(status_code=400, detail="Invalid file encoding") from exc
+    text = _extract_text(content, file.filename)
 
     vector_store.add_document(text)
 
