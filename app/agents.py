@@ -131,10 +131,11 @@ def identify_field(field_name: str, document: str, rules: str, knowledge_base):
     if not api_key:
         raise EnvironmentError("OPENAI_API_KEY is not set")
 
-    # Import OpenAI lazily so tests can run without the package installed.
-    import openai
+    # Import OpenAI lazily so tests can run without the package installed and
+    # instantiate a client using the new 1.x interface.
+    from openai import OpenAI
 
-    openai.api_key = api_key
+    client = OpenAI(api_key=api_key)
 
     relevant = select_relevant_chunks(field_name, knowledge_base)
     context = "\n---\n".join(relevant)
@@ -143,7 +144,7 @@ def identify_field(field_name: str, document: str, rules: str, knowledge_base):
         f"Extract the value for '{field_name}'."
     )
 
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-3.5-turbo", messages=[{"role": "user", "content": prompt}]
     )
-    return response["choices"][0]["message"]["content"].strip()
+    return response.choices[0].message.content.strip()
