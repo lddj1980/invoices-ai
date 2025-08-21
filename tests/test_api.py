@@ -26,8 +26,15 @@ def test_upload_invoice_extracts_fields(monkeypatch):
             "nome_do_exportador": "ACME LTDA",
         }
 
+    def fake_identify_products(document, product_rules, knowledge_base):
+        return [
+            {"descricao": "ABC", "quantidade": "1", "tamanho": "S"},
+            {"descricao": "DEF", "quantidade": "2", "tamanho": "M"},
+        ]
+
     vector_store.chunks = []
     monkeypatch.setattr("app.main.identify_fields", fake_identify_fields)
+    monkeypatch.setattr("app.main.identify_products", fake_identify_products)
 
     response = client.post(
         "/invoices", files={"file": ("invoice.pdf", PDF_WITH_TEXT, "application/pdf")}
@@ -37,6 +44,7 @@ def test_upload_invoice_extracts_fields(monkeypatch):
     assert body["fields"]["sales_condition"] == "FOB"
     assert body["fields"]["exportador_fabricante"] == "não"
     assert body["fields"]["nome_do_exportador"] == "ACME LTDA"
+    assert body["fields"]["produtos"][0]["descricao"] == "ABC"
     assert vector_store.chunks  # ensure document was added
 
 
@@ -60,6 +68,7 @@ def test_upload_invoice_uses_ocr_when_no_text(monkeypatch):
     monkeypatch.setattr(
         "app.main.identify_fields", lambda *args, **kwargs: {"sales_condition": "FOB"}
     )
+    monkeypatch.setattr("app.main.identify_products", lambda *args, **kwargs: [])
     monkeypatch.setattr("app.main.PdfReader", DummyPdfReader)
     monkeypatch.setitem(
         sys.modules,
