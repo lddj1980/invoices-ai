@@ -246,3 +246,47 @@ def identify_fields(
             field_name, document, rules, knowledge_base
         )
     return results
+
+
+def identify_products(document: str, product_rules: dict, knowledge_base):
+    """Identify a list of products in ``document`` using RAG calls.
+
+    Each entry in ``product_rules`` describes how to extract a particular
+    attribute (e.g. description or quantity).  The associated LLM responses are
+    expected to contain one value per line, allowing this function to assemble
+    the individual attributes into a list of product dictionaries.
+
+    Parameters
+    ----------
+    document:
+        Full text of the source document.
+    product_rules:
+        Mapping of product field names to extraction rules.  Each rule should
+        instruct the model to return one value per line.
+    knowledge_base:
+        Iterable of text chunks used for retrieval.
+
+    Returns
+    -------
+    list of dict
+        A list where each element is a dictionary representing a product and
+        containing the fields specified in ``product_rules``.
+    """
+
+    extracted = {}
+    max_len = 0
+    for field_name, rules in product_rules.items():
+        value = identify_field(field_name, document, rules, knowledge_base)
+        items = [item.strip() for item in value.splitlines() if item.strip()]
+        extracted[field_name] = items
+        if len(items) > max_len:
+            max_len = len(items)
+
+    products = []
+    for i in range(max_len):
+        product = {}
+        for field_name, values in extracted.items():
+            product[field_name] = values[i] if i < len(values) else None
+        products.append(product)
+
+    return products

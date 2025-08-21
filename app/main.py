@@ -4,7 +4,7 @@ import tempfile
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from typing import Dict, List
 
-from .agents import identify_fields, select_relevant_chunks
+from .agents import identify_fields, identify_products, select_relevant_chunks
 
 try:  # pragma: no cover - handled via tests
     from PyPDF2 import PdfReader
@@ -47,6 +47,12 @@ FIELD_RULES: Dict[str, str] = {
         "precedidos por palavras como 'To'. Responda apenas com o nome do possível exportador, sem "
         "justificar ou explicar."
     ),
+}
+
+PRODUCT_RULES: Dict[str, str] = {
+    "descricao": "Liste as descrições dos produtos, uma por linha, na ordem em que aparecem.",
+    "quantidade": "Liste a quantidade de cada produto, uma por linha, seguindo a mesma ordem.",
+    "tamanho": "Liste o tamanho ou dimensão de cada produto, uma por linha, seguindo a mesma ordem.",
 }
 
 
@@ -110,4 +116,5 @@ async def upload_invoice(file: UploadFile = File(...)):
     vector_store.add_document(text)
 
     fields = identify_fields(text, FIELD_RULES, vector_store.chunks)
+    fields["produtos"] = identify_products(text, PRODUCT_RULES, vector_store.chunks)
     return {"filename": file.filename, "fields": fields}

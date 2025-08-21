@@ -16,6 +16,7 @@ from app.agents import (
     select_relevant_chunks,
     identify_field,
     identify_fields,
+    identify_products,
 )
 from app.main import FIELD_RULES
 
@@ -144,3 +145,28 @@ def test_identify_fields_invokes_identify_field(monkeypatch):
         ("a", "doc", "rule A", ["kb"]),
         ("b", "doc", "rule B", ["kb"]),
     ]
+
+
+def test_identify_products_zips_fields(monkeypatch):
+    calls = {}
+
+    def fake_identify_field(field_name, document, rules, knowledge_base):
+        calls[field_name] = (document, rules, knowledge_base)
+        if field_name == "descricao":
+            return "A\nB"
+        if field_name == "quantidade":
+            return "1\n2"
+        if field_name == "tamanho":
+            return "S\nM"
+
+    monkeypatch.setattr("app.agents.identify_field", fake_identify_field)
+
+    rules = {"descricao": "d", "quantidade": "q", "tamanho": "t"}
+    result = identify_products("doc", rules, ["kb"])
+
+    assert result == [
+        {"descricao": "A", "quantidade": "1", "tamanho": "S"},
+        {"descricao": "B", "quantidade": "2", "tamanho": "M"},
+    ]
+    for field_name in rules:
+        assert calls[field_name] == ("doc", rules[field_name], ["kb"])
