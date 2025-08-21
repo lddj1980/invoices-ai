@@ -104,9 +104,10 @@ def select_relevant_chunks(query: str, chunks, top_k: int = 3):
 def identify_field(field_name: str, document: str, rules: str, knowledge_base):
     """Use OpenAI's LLM to identify a field in ``document``.
 
-    The function retrieves ``OPENAI_API_KEY`` from the environment and uses a
-    simple RAG approach: ``knowledge_base`` is searched for the chunks most
-    relevant to ``field_name`` and provided to the model as context.
+    The function retrieves ``OPENAI_API_KEY`` and ``OPENAI_API_MODEL`` from the
+    environment and uses a simple RAG approach: ``knowledge_base`` is searched
+    for the chunks most relevant to ``field_name`` and provided to the model as
+    context.
 
     Parameters
     ----------
@@ -128,13 +129,17 @@ def identify_field(field_name: str, document: str, rules: str, knowledge_base):
     import os
 
     api_key = os.getenv("OPENAI_API_KEY")
+    model = os.getenv("OPENAI_API_MODEL")
     if not api_key:
         raise EnvironmentError("OPENAI_API_KEY is not set")
+    if not model:
+        raise EnvironmentError("OPENAI_API_MODEL is not set")
 
-    # Import OpenAI lazily so tests can run without the package installed.
-    import openai
+    # Import OpenAI lazily so tests can run without the package installed and
+    # instantiate a client using the new 1.x interface.
+    from openai import OpenAI
 
-    openai.api_key = api_key
+    client = OpenAI(api_key=api_key)
 
     relevant = select_relevant_chunks(field_name, knowledge_base)
     context = "\n---\n".join(relevant)
@@ -143,7 +148,7 @@ def identify_field(field_name: str, document: str, rules: str, knowledge_base):
         f"Extract the value for '{field_name}'."
     )
 
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo", messages=[{"role": "user", "content": prompt}]
+    response = client.chat.completions.create(
+        model=model, messages=[{"role": "user", "content": prompt}]
     )
-    return response["choices"][0]["message"]["content"].strip()
+    return response.choices[0].message.content.strip()
