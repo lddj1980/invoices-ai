@@ -12,6 +12,7 @@ from app.agents import (
     SALES_CONDITION_PROMPT,
     normalize_sales_condition,
     exportador_fabricante,
+    possible_company_names,
     select_relevant_chunks,
     identify_field,
 )
@@ -50,6 +51,11 @@ def test_exportador_fabricante_when_phrase_absent():
     assert exportador_fabricante("No relation mentioned.") is False
 
 
+def test_possible_company_names_ignores_to_lines():
+    text = "ACME LTDA\nTo: Importer SA\nExporter LLC"
+    assert possible_company_names(text) == ["ACME LTDA", "Exporter LLC"]
+
+
 def test_select_relevant_chunks_returns_best_match():
     chunks = [
         "exporter manufacturer",
@@ -77,6 +83,10 @@ def test_identify_field_requires_model(monkeypatch):
 
 def test_field_rules_has_exportador_fabricante():
     assert "exportador_fabricante" in FIELD_RULES
+
+
+def test_field_rules_has_nome_do_exportador():
+    assert "nome_do_exportador" in FIELD_RULES
 
 
 def test_identify_field_uses_rules_and_fallback(monkeypatch):

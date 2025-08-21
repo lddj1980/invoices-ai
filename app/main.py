@@ -42,6 +42,7 @@ vector_store = InMemoryVectorStore()
 FIELD_RULES: Dict[str, str] = {
     "sales_condition": "Identify the sales condition code present in the invoice.",
     "exportador_fabricante": "Determine se o exportador também é o fabricante. Responda 'sim' ou 'não'.",
+    "nome_do_exportador": "Liste possíveis nomes de empresas exportadoras presentes no documento que não estejam precedidos por palavras como 'To'.",
 }
 
 
