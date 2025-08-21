@@ -34,13 +34,14 @@ class InMemoryVectorStore:
         self.chunks.extend(_split_into_chunks(text))
 
     def search(self, query: str, top_k: int = 3) -> List[str]:
-        return select_relevant_chunks(query, self.chunks, top_k=top_k)
+        return [chunk for _, chunk in select_relevant_chunks(query, self.chunks, top_k=top_k)]
 
 
 vector_store = InMemoryVectorStore()
 
 FIELD_RULES: Dict[str, str] = {
     "sales_condition": "Identify the sales condition code present in the invoice.",
+    "exportador_fabricante": "Determine se o exportador também é o fabricante. Responda 'sim' ou 'não'.",
 }
 
 

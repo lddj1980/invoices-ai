@@ -18,10 +18,13 @@ def test_upload_invoice_extracts_fields(monkeypatch):
     client = TestClient(app)
 
     def fake_identify_field(field_name, document, rules, knowledge_base):
-        assert field_name == "sales_condition"
         assert "FOB" in document
         assert knowledge_base  # persistence to vector store
-        return "FOB"
+        if field_name == "sales_condition":
+            return "FOB"
+        if field_name == "exportador_fabricante":
+            return "não"
+        raise AssertionError("unexpected field")
 
     vector_store.chunks = []
     monkeypatch.setattr("app.main.identify_field", fake_identify_field)
@@ -32,6 +35,7 @@ def test_upload_invoice_extracts_fields(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["fields"]["sales_condition"] == "FOB"
+    assert body["fields"]["exportador_fabricante"] == "não"
     assert vector_store.chunks  # ensure document was added
 
 
