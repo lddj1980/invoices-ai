@@ -212,3 +212,37 @@ def identify_field(field_name: str, document: str, rules: str, knowledge_base):
         model=model, messages=[{"role": "user", "content": prompt}]
     )
     return response.choices[0].message.content.strip()
+
+
+def identify_fields(
+    document: str, field_rules: dict, knowledge_base
+):
+    """Identify multiple fields in ``document`` using separate RAG calls.
+
+    For each ``field_name`` and its ``rules`` in ``field_rules`` a dedicated
+    :func:`identify_field` invocation is performed so that context retrieval and
+    LLM generation happen independently.  The collected results are returned in a
+    dictionary mapping field names to the extracted values.
+
+    Parameters
+    ----------
+    document:
+        Full text of the source document.
+    field_rules:
+        Mapping of field names to the extraction rules for each field.
+    knowledge_base:
+        Iterable of text chunks used for retrieval.
+
+    Returns
+    -------
+    dict
+        Dictionary with one entry per ``field_rules`` item, containing the
+        extracted values.
+    """
+
+    results = {}
+    for field_name, rules in field_rules.items():
+        results[field_name] = identify_field(
+            field_name, document, rules, knowledge_base
+        )
+    return results

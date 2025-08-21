@@ -17,19 +17,17 @@ PDF_WITH_TEXT = b"""%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 ob
 def test_upload_invoice_extracts_fields(monkeypatch):
     client = TestClient(app)
 
-    def fake_identify_field(field_name, document, rules, knowledge_base):
+    def fake_identify_fields(document, field_rules, knowledge_base):
         assert "FOB" in document
         assert knowledge_base  # persistence to vector store
-        if field_name == "sales_condition":
-            return "FOB"
-        if field_name == "exportador_fabricante":
-            return "não"
-        if field_name == "nome_do_exportador":
-            return "ACME LTDA"
-        raise AssertionError("unexpected field")
+        return {
+            "sales_condition": "FOB",
+            "exportador_fabricante": "não",
+            "nome_do_exportador": "ACME LTDA",
+        }
 
     vector_store.chunks = []
-    monkeypatch.setattr("app.main.identify_field", fake_identify_field)
+    monkeypatch.setattr("app.main.identify_fields", fake_identify_fields)
 
     response = client.post(
         "/invoices", files={"file": ("invoice.pdf", PDF_WITH_TEXT, "application/pdf")}
@@ -59,9 +57,15 @@ def test_upload_invoice_uses_ocr_when_no_text(monkeypatch):
             return [[[[[0, 0], [1, 0], [1, 1], [0, 1]], ("FOB sale condition: FOB", 0.9)]]]
 
     vector_store.chunks = []
-    monkeypatch.setattr("app.main.identify_field", lambda *args, **kwargs: "FOB")
+    monkeypatch.setattr(
+        "app.main.identify_fields", lambda *args, **kwargs: {"sales_condition": "FOB"}
+    )
     monkeypatch.setattr("app.main.PdfReader", DummyPdfReader)
-    monkeypatch.setitem(sys.modules, "paddleocr", SimpleNamespace(PaddleOCR=lambda *a, **k: DummyOCR()))
+    monkeypatch.setitem(
+        sys.modules,
+        "paddleocr",
+        SimpleNamespace(PaddleOCR=lambda *a, **k: DummyOCR()),
+    )
 
     response = client.post(
         "/invoices", files={"file": ("invoice.pdf", blank_pdf, "application/pdf")}

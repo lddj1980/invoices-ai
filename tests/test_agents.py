@@ -15,6 +15,7 @@ from app.agents import (
     possible_company_names,
     select_relevant_chunks,
     identify_field,
+    identify_fields,
 )
 from app.main import FIELD_RULES
 
@@ -122,3 +123,24 @@ def test_identify_field_uses_rules_and_fallback(monkeypatch):
     assert captured["query"] == "field rules"
     context_section = captured["prompt"].split("Context:\n")[1].split("\n\nDocument:")[0]
     assert context_section == "full document"
+
+
+def test_identify_fields_invokes_identify_field(monkeypatch):
+    calls = []
+
+    def fake_identify_field(field_name, document, rules, knowledge_base):
+        calls.append((field_name, document, rules, knowledge_base))
+        return f"value-{field_name}"
+
+    monkeypatch.setattr("app.agents.identify_field", fake_identify_field)
+
+    result = identify_fields(
+        "doc",
+        {"a": "rule A", "b": "rule B"},
+        ["kb"],
+    )
+    assert result == {"a": "value-a", "b": "value-b"}
+    assert calls == [
+        ("a", "doc", "rule A", ["kb"]),
+        ("b", "doc", "rule B", ["kb"]),
+    ]
