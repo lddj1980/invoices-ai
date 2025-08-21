@@ -1,22 +1,23 @@
 SALE_CONDITIONS = {
-    "CFR": "...",
-    "CIF": "...",
-    "CIP": "...",
-    "CPT": "...",
-    "C_F": "...",
-    "C_I": "...",
-    "DAP": "...",
-    "DAT": "...",
-    "EXW": "...",
-    "FAS": "...",
-    "FCA": "...",
-    "FOB": "...",
-    "OCV": "...",
+    "CFR": "Cost and Freight",
+    "CIF": "Cost, Insurance and Freight",
+    "CIP": "Carriage and Insurance Paid To",
+    "CPT": "Carriage Paid To",
+    "C_F": "Custo e Frete",
+    "C_I": "Custo e Seguro",
+    "DAP": "Delivered At Place",
+    "DAT": "Delivered At Terminal",
+    "EXW": "Ex Works",
+    "FAS": "Free Alongside Ship",
+    "FCA": "Free Carrier",
+    "FOB": "Free On Board",
+    "OCV": "Outra Condição de Venda (ver README.md#condições-de-venda-suportadas)",
 }
 
 # Prompt used to capture the sales condition from a user or external system.
 SALES_CONDITION_PROMPT = (
-    "Informe a condição de venda (" + ", ".join(SALE_CONDITIONS.keys()) + "):"
+    "Informe a condição de venda (" + ", ".join(SALE_CONDITIONS.keys()) + "). "
+    "Consulte README.md#condições-de-venda-suportadas:"
 )
 
 
