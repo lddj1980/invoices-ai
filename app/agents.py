@@ -1,29 +1,22 @@
-from enum import Enum
-
-
-class SalesCondition(str, Enum):
-    """Enum representing supported sales conditions."""
-    CFR = "CFR"
-    CIF = "CIF"
-    CIP = "CIP"
-    CPT = "CPT"
-    C_F = "C_F"
-    C_I = "C_I"
-    DAP = "DAP"
-    DAT = "DAT"
-    EXW = "EXW"
-    FAS = "FAS"
-    FCA = "FCA"
-    FOB = "FOB"
-    OCV = "OCV"
-
+SALE_CONDITIONS = {
+    "CFR": "...",
+    "CIF": "...",
+    "CIP": "...",
+    "CPT": "...",
+    "C_F": "...",
+    "C_I": "...",
+    "DAP": "...",
+    "DAT": "...",
+    "EXW": "...",
+    "FAS": "...",
+    "FCA": "...",
+    "FOB": "...",
+    "OCV": "...",
+}
 
 # Prompt used to capture the sales condition from a user or external system.
-# This replaces the previous hard coded "condição de venda como FOB" string
-# with a generic message that lists every supported option.
 SALES_CONDITION_PROMPT = (
-    "Informe a condição de venda (CFR, CIF, CIP, CPT, C_F, C_I, DAP, DAT, EXW, "
-    "FAS, FCA, FOB, OCV):"
+    "Informe a condição de venda (" + ", ".join(SALE_CONDITIONS.keys()) + "):"
 )
 
 
@@ -46,7 +39,6 @@ def normalize_sales_condition(value: str) -> str:
         If ``value`` is not a supported sales condition.
     """
     code = value.strip().upper()
-    try:
-        return SalesCondition(code).value
-    except ValueError as exc:  # pragma: no cover - error message is enough
-        raise ValueError(f"Condição de venda inválida: {value}") from exc
+    if code in SALE_CONDITIONS:
+        return code
+    raise ValueError("Condição de venda desconhecida")
