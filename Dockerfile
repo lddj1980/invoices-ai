@@ -4,7 +4,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install dependencies
-RUN pip install --no-cache-dir fastapi uvicorn PyPDF2 paddleocr openai
+RUN pip install --no-cache-dir fastapi uvicorn PyPDF2 paddleocr openai python-multipart
 
 # Copy project files
 COPY . .
