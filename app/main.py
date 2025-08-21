@@ -4,7 +4,7 @@ import tempfile
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from typing import Dict, List
 
-from .agents import identify_field, select_relevant_chunks
+from .agents import identify_fields, select_relevant_chunks
 
 try:  # pragma: no cover - handled via tests
     from PyPDF2 import PdfReader
@@ -105,9 +105,5 @@ async def upload_invoice(file: UploadFile = File(...)):
 
     vector_store.add_document(text)
 
-    fields = {}
-    for field_name, rules in FIELD_RULES.items():
-        fields[field_name] = identify_field(
-            field_name, text, rules, vector_store.chunks
-        )
+    fields = identify_fields(text, FIELD_RULES, vector_store.chunks)
     return {"filename": file.filename, "fields": fields}
