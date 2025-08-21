@@ -10,7 +10,7 @@ from app.agents import (
     SALE_CONDITIONS,
     SALES_CONDITION_PROMPT,
     normalize_sales_condition,
-    exporter_is_manufacturer,
+    exportador_fabricante,
     select_relevant_chunks,
     identify_field,
 )
@@ -34,13 +34,18 @@ def test_invalid_condition_raises_error():
         normalize_sales_condition("XYZ")
 
 
-def test_exporter_is_manufacturer_detects_phrase():
+def test_exportador_fabricante_detects_phrase():
     text = "Some info THE EXPORTER IS THE SAME AS THE MANUFACTURER end."
-    assert exporter_is_manufacturer(text) is True
+    assert exportador_fabricante(text) is True
 
 
-def test_exporter_is_manufacturer_when_phrase_absent():
-    assert exporter_is_manufacturer("No relation mentioned.") is False
+def test_exportador_fabricante_detects_variation():
+    text = "Details: The exporter is also the manufacturer of the goods."
+    assert exportador_fabricante(text) is True
+
+
+def test_exportador_fabricante_when_phrase_absent():
+    assert exportador_fabricante("No relation mentioned.") is False
 
 
 def test_select_relevant_chunks_returns_best_match():
