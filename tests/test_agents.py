@@ -11,6 +11,8 @@ from app.agents import (
     SALES_CONDITION_PROMPT,
     normalize_sales_condition,
     exporter_is_manufacturer,
+    select_relevant_chunks,
+    identify_field,
 )
 
 
@@ -39,3 +41,19 @@ def test_exporter_is_manufacturer_detects_phrase():
 
 def test_exporter_is_manufacturer_when_phrase_absent():
     assert exporter_is_manufacturer("No relation mentioned.") is False
+
+
+def test_select_relevant_chunks_returns_best_match():
+    chunks = [
+        "exporter manufacturer",
+        "other data",
+        "manufacturer exporter info",
+    ]
+    result = select_relevant_chunks("exporter", chunks, top_k=1)
+    assert result == ["exporter manufacturer"]
+
+
+def test_identify_field_requires_api_key(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(EnvironmentError):
+        identify_field("field", "doc", "rules", ["chunk"])
