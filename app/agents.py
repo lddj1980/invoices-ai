@@ -42,6 +42,28 @@ def normalize_sales_condition(value: str) -> str:
     code = value.strip().upper()
     if code in SALE_CONDITIONS:
         return code
-    raise ValueError(
-        "Condição de venda desconhecida. Consulte README.md#condições-de-venda-suportadas"
-    )
+    raise ValueError("Condição de venda desconhecida")
+
+
+def exporter_is_manufacturer(text: str) -> bool:
+    """Check whether a document states that exporter and manufacturer are the same.
+
+    The check is performed by searching for the phrase
+    ``"the exporter is the same as the manufacturer"`` in a case-insensitive
+    manner. Extraneous whitespace is ignored so that the match is resilient to
+    formatting differences in the source text.
+
+    Parameters
+    ----------
+    text: str
+        Text extracted from an invoice or related document.
+
+    Returns
+    -------
+    bool
+        ``True`` if the phrase is present, otherwise ``False``.
+    """
+
+    normalized_text = " ".join(text.lower().split())
+    phrase = "the exporter is the same as the manufacturer"
+    return phrase in normalized_text

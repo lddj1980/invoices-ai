@@ -6,7 +6,12 @@ import pytest
 # Ensure the project root is on the Python path
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from app.agents import SALE_CONDITIONS, SALES_CONDITION_PROMPT, normalize_sales_condition
+from app.agents import (
+    SALE_CONDITIONS,
+    SALES_CONDITION_PROMPT,
+    normalize_sales_condition,
+    exporter_is_manufacturer,
+)
 
 
 def test_prompt_lists_all_conditions():
@@ -25,3 +30,12 @@ def test_normalize_sales_condition_cfr_case_insensitive_and_spaces():
 def test_invalid_condition_raises_error():
     with pytest.raises(ValueError):
         normalize_sales_condition("XYZ")
+
+
+def test_exporter_is_manufacturer_detects_phrase():
+    text = "Some info THE EXPORTER IS THE SAME AS THE MANUFACTURER end."
+    assert exporter_is_manufacturer(text) is True
+
+
+def test_exporter_is_manufacturer_when_phrase_absent():
+    assert exporter_is_manufacturer("No relation mentioned.") is False
