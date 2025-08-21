@@ -24,6 +24,8 @@ def test_upload_invoice_extracts_fields(monkeypatch):
             return "FOB"
         if field_name == "exportador_fabricante":
             return "não"
+        if field_name == "nome_do_exportador":
+            return "ACME LTDA"
         raise AssertionError("unexpected field")
 
     vector_store.chunks = []
@@ -36,6 +38,7 @@ def test_upload_invoice_extracts_fields(monkeypatch):
     body = response.json()
     assert body["fields"]["sales_condition"] == "FOB"
     assert body["fields"]["exportador_fabricante"] == "não"
+    assert body["fields"]["nome_do_exportador"] == "ACME LTDA"
     assert vector_store.chunks  # ensure document was added
 
 

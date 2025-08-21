@@ -88,6 +88,42 @@ def exportador_fabricante(text: str) -> bool:
     return exporter_is_manufacturer(text)
 
 
+def possible_company_names(text: str):
+    """Return possible company names not preceded by ``To``.
+
+    The function applies a simple heuristic over each line of ``text``
+    looking for common company suffixes (e.g. ``Ltda``, ``SA``, ``Inc``).
+    Lines that start with ``To`` are ignored to avoid capturing the
+    recipient of the document.  Matching is case-insensitive and the
+    detected names are returned in the order they appear.
+
+    Parameters
+    ----------
+    text:
+        Raw text extracted from an invoice or related document.
+
+    Returns
+    -------
+    list of str
+        List of company-like names found in ``text``.
+    """
+
+    import re
+
+    suffixes = r"(?:S\.A\.?|SA|LTDA|Ltda|LTD|Ltd|Inc\.?|INC|LLC|Corp\.?|Corporation|Company|Co\.?|GmbH)"
+    pattern = re.compile(rf"\b([A-Z][A-Za-z0-9&.,'\s]+?{suffixes})\b")
+
+    names = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.lower().startswith("to"):
+            continue
+        match = pattern.search(stripped)
+        if match:
+            names.append(match.group(1).strip())
+    return names
+
+
 def select_relevant_chunks(query: str, chunks, top_k: int = 3):
     """Return the most relevant chunks using a simple lexical similarity.
 
