@@ -46,27 +46,46 @@ def normalize_sales_condition(value: str) -> str:
 
 
 def exporter_is_manufacturer(text: str) -> bool:
-    """Check whether a document states that exporter and manufacturer are the same.
+    """Return ``True`` if the text states exporter and manufacturer are the same.
 
-    The check is performed by searching for the phrase
-    ``"the exporter is the same as the manufacturer"`` in a case-insensitive
-    manner. Extraneous whitespace is ignored so that the match is resilient to
-    formatting differences in the source text.
+    The detection is intentionally conservative and relies on a small set of
+    regular expressions that cover common ways of expressing that the exporter
+    and manufacturer are a single entity.  Both English and Portuguese phrases
+    are supported.
 
     Parameters
     ----------
-    text: str
+    text:
         Text extracted from an invoice or related document.
 
     Returns
     -------
     bool
-        ``True`` if the phrase is present, otherwise ``False``.
+        ``True`` if a known phrase is detected, otherwise ``False``.
     """
 
+    import re
+
     normalized_text = " ".join(text.lower().split())
-    phrase = "the exporter is the same as the manufacturer"
-    return phrase in normalized_text
+
+    patterns = [
+        r"the\s+exporter\s+is\s+the\s+same\s+as\s+the\s+manufacturer",
+        r"the\s+exporter\s+is\s+also\s+the\s+manufacturer",
+        r"the\s+exporter\s+and\s+the\s+manufacturer\s+are\s+the\s+same",
+        r"the\s+exporter\s+is\s+the\s+manufacturer",
+        r"o\s+exportador\s+é\s+o\s+mesmo\s+que\s+o\s+fabricante",
+        r"o\s+exportador\s+é\s+tamb[eé]m\s+o\s+fabricante",
+        r"o\s+exportador\s+e\s+o\s+fabricante\s+são\s+o\s+mesmo",
+        r"o\s+exportador\s+é\s+o\s+fabricante",
+    ]
+
+    return any(re.search(pattern, normalized_text) for pattern in patterns)
+
+
+def exportador_fabricante(text: str) -> bool:
+    """Convenience wrapper to keep a Portuguese friendly API name."""
+
+    return exporter_is_manufacturer(text)
 
 
 def select_relevant_chunks(query: str, chunks, top_k: int = 3):
