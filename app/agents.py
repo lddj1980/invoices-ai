@@ -106,8 +106,8 @@ def select_relevant_chunks(query: str, chunks, top_k: int = 3):
 
     Returns
     -------
-    list of str
-        The ``top_k`` chunks ordered from most to least relevant.
+    list of tuple
+        Tuples of ``(score, chunk)`` ordered from most to least relevant.
     """
 
     from difflib import SequenceMatcher
@@ -117,7 +117,7 @@ def select_relevant_chunks(query: str, chunks, top_k: int = 3):
         for chunk in chunks
     ]
     scored.sort(reverse=True)
-    return [chunk for _, chunk in scored[:top_k]]
+    return scored[:top_k]
 
 
 def identify_field(field_name: str, document: str, rules: str, knowledge_base):
@@ -160,8 +160,13 @@ def identify_field(field_name: str, document: str, rules: str, knowledge_base):
 
     client = OpenAI(api_key=api_key)
 
-    relevant = select_relevant_chunks(field_name, knowledge_base)
-    context = "\n---\n".join(relevant)
+    query = f"{field_name} {rules}".strip()
+    relevant = select_relevant_chunks(query, knowledge_base)
+    if not relevant or relevant[0][0] < 0.3:
+        context = document
+    else:
+        context = "\n---\n".join(chunk for _, chunk in relevant)
+
     prompt = (
         f"{rules}\n\nContext:\n{context}\n\nDocument:\n{document}\n"
         f"Extract the value for '{field_name}'."

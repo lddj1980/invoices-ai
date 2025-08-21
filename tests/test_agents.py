@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,6 +15,7 @@ from app.agents import (
     select_relevant_chunks,
     identify_field,
 )
+from app.main import FIELD_RULES
 
 
 def test_prompt_lists_all_conditions():
@@ -55,7 +57,8 @@ def test_select_relevant_chunks_returns_best_match():
         "manufacturer exporter info",
     ]
     result = select_relevant_chunks("exporter", chunks, top_k=1)
-    assert result == ["exporter manufacturer"]
+    assert result[0][1] == "exporter manufacturer"
+    assert 0 <= result[0][0] <= 1
 
 
 def test_identify_field_requires_api_key(monkeypatch):
@@ -70,3 +73,42 @@ def test_identify_field_requires_model(monkeypatch):
     monkeypatch.delenv("OPENAI_API_MODEL", raising=False)
     with pytest.raises(EnvironmentError):
         identify_field("field", "doc", "rules", ["chunk"])
+
+
+def test_field_rules_has_exportador_fabricante():
+    assert "exportador_fabricante" in FIELD_RULES
+
+
+def test_identify_field_uses_rules_and_fallback(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("OPENAI_API_MODEL", "gpt-test")
+
+    captured = {}
+
+    def fake_select(query, chunks, top_k=3):
+        captured["query"] = query
+        return [(0.1, "irrelevant")]
+
+    class DummyCompletions:
+        def create(self, model, messages):
+            captured["prompt"] = messages[0]["content"]
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(message=SimpleNamespace(content="result"))
+                ]
+            )
+
+    class DummyClient:
+        def __init__(self, *a, **k):
+            self.chat = SimpleNamespace(completions=DummyCompletions())
+
+    dummy_openai = SimpleNamespace(OpenAI=lambda api_key: DummyClient())
+
+    monkeypatch.setattr("app.agents.select_relevant_chunks", fake_select)
+    monkeypatch.setitem(sys.modules, "openai", dummy_openai)
+
+    identify_field("field", "full document", "rules", ["chunk"])
+
+    assert captured["query"] == "field rules"
+    context_section = captured["prompt"].split("Context:\n")[1].split("\n\nDocument:")[0]
+    assert context_section == "full document"
