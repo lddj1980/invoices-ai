@@ -55,5 +55,13 @@ def test_select_relevant_chunks_returns_best_match():
 
 def test_identify_field_requires_api_key(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_MODEL", "gpt-test")
+    with pytest.raises(EnvironmentError):
+        identify_field("field", "doc", "rules", ["chunk"])
+
+
+def test_identify_field_requires_model(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.delenv("OPENAI_API_MODEL", raising=False)
     with pytest.raises(EnvironmentError):
         identify_field("field", "doc", "rules", ["chunk"])
