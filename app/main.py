@@ -107,6 +107,14 @@ def _extract_text(content: bytes, filename: str) -> str:
         raise HTTPException(status_code=400, detail="Invalid file encoding") from exc
 
 
+@app.post("/invoice-text")
+async def upload_invoice_text(file: UploadFile = File(...)):
+    """Upload an invoice and return only the extracted raw text."""
+    content = await file.read()
+    text = _extract_text(content, file.filename)
+    return {"filename": file.filename, "text": text}
+
+
 @app.post("/invoices")
 async def upload_invoice(file: UploadFile = File(...)):
     """Upload an invoice and extract relevant fields using RAG."""
