@@ -248,45 +248,208 @@ def identify_fields(
     return results
 
 
-def identify_products(document: str, product_rules: dict, knowledge_base):
-    """Identify a list of products in ``document`` using RAG calls.
+# Prompts used by the product extraction agents. Prompt 1 identifies and
+# normalizes table headers, while Prompt 2 extracts the structured products and
+# totals using those headers.
+PRODUCT_HEADERS_PROMPT = (
+    "Você é um extrator de metadados de tabelas em documentos de comércio "
+    "exterior (packing list).\n"
+    "Dado um texto bruto (com quebras de linha e possíveis erros de OCR), "
+    "identifique somente os nomes das colunas da tabela de itens, "
+    "padronize-os e retorne um JSON com:\n\n"
+    "raw_headers_detected: lista com todos os cabeçalhos/frases reconhecidos "
+    "(na ordem de aparição, sem deduplicar).\n\n"
+    "normalized_headers: lista única com mapeamento normalizado recomendado, "
+    "usando exatamente estes nomes quando presentes:\n\n"
+    "no, description, size_spec, qty_pc, pcs_per_ctn, ctn_per_plt, plts, "
+    "net_weight_kg, gross_weight_kg, volume_cbm\n\n"
+    "mapping: objeto { <raw>: <normalized> } com o mapeamento realizado.\n\n"
+    "Regras duras:\n\n"
+    "Não invente colunas. Se uma coluna não existir no texto, não inclua em "
+    "normalized_headers.\n\n"
+    "Considere variações e ruído de OCR, mapeando para os nomes acima. "
+    "Exemplos de alias comuns:\n\n"
+    "NO. → no\n\n"
+    "DESCRIPTION, DESC, DBSCRIPTION, DESCRIÇÃO → description\n\n"
+    "SIZE, SIZEQTY, SIZES → size_spec\n\n"
+    "QTY., QTY, QTY(PC), QTY (PC), QTY.(PC) → qty_pc\n\n"
+    "PCS/CTN, PCS / CTN, PCSCTN → pcs_per_ctn\n\n"
+    "CTN/PLT, CTN / PLT, CTNPLT → ctn_per_plt\n\n"
+    "PLTS, PLT, PALLETS → plts\n\n"
+    "N.W. (KGS), NW, N.W., N.W.(KGs) → net_weight_kg\n\n"
+    "G.W. (KGS), GW, G.W., G.W.(KGs) → gross_weight_kg\n\n"
+    "Volume (CBM), CBM, cBlvt, cBIvt, cBrvr → volume_cbm\n\n"
+    "Saída apenas JSON válido, sem texto extra.\n\n"
+    "Entrada: {TEXTO_BRUTO}"
+)
 
-    Each entry in ``product_rules`` describes how to extract a particular
-    attribute (e.g. description or quantity).  The associated LLM responses are
-    expected to contain one value per line, allowing this function to assemble
-    the individual attributes into a list of product dictionaries.
+PRODUCT_ITEMS_PROMPT = (
+    "Você é um extrator estruturado de packing list.\n"
+    "A partir do texto bruto e do conjunto de nomes de colunas "
+    "detectadas/normalizadas (do prompt anterior), extraia os itens em uma "
+    "estrutura de cabeçalho + detalhes:\n\n"
+    "Esquema de saída\n\n"
+    "Retorne apenas um JSON com:\n\n"
+    "{\n"
+    "  \"products\": [\n"
+    "    {\n"
+    "      \"no\": \"string|null\",\n"
+    "      \"description\": \"string\",\n"
+    "      \"details\": [\n"
+    "        {\n"
+    "          \"seq_no\": 1,\n"
+    "          \"size_spec\": \"string|null\",\n"
+    "          \"qty_pc\": \"number|null\",\n"
+    "          \"pcs_per_ctn\": \"number|null\",\n"
+    "          \"ctn_per_plt\": \"number|null\",\n"
+    "          \"plts\": \"number|null\",\n"
+    "          \"net_weight_kg\": \"number|null\",\n"
+    "          \"gross_weight_kg\": \"number|null\",\n"
+    "          \"volume_cbm\": \"number|null\"\n"
+    "        }\n"
+    "      ]\n"
+    "    }\n"
+    "  ],\n"
+    "  \"totals_detected\": {\n"
+    "    \"total_net_weight_kg\": \"number|null\",\n"
+    "    \"total_gross_weight_kg\": \"number|null\",\n"
+    "    \"total_volume_cbm\": \"number|null\",\n"
+    "    \"pallets_count\": \"number|null\"\n"
+    "  }\n"
+    "}\n\n"
+    "Regras de parsing\n\n"
+    "Descrição como cabeçalho: uma nova description indica um novo product.\n\n"
+    "Múltiplas sequências: após a description, podem aparecer várias linhas de "
+    "detalhe para o mesmo produto (tamanhos diferentes, pesos/quantidades "
+    "diferentes, etc.). Cada linha vira um objeto em details com seq_no "
+    "crescente a partir de 1.\n\n"
+    "no: quando houver um marcador de item como t#, 2#, 14#, NO. etc., use-o "
+    "(texto puro). Se ausente, use null.\n\n"
+    "size_spec: mantenha o texto integral do tamanho/especificação (ex.: M10, "
+    "1\" (24–26mm), 1.1/4\"–1.3/8\" (32–36mm)).\n\n"
+    "Números: converter para número (ponto decimal). Troque vírgula por ponto. "
+    "Remova unidades (ex.: KGs).\n\n"
+    "Campos ausentes → null.\n\n"
+    "Corrija ruídos comuns de OCR quando inequívocos (ex.: cBIvt→CBM, DBSCRIPTION→DESCRIPTION, G.W→G.W.).\n\n"
+    "Não deduza pesos/volumes quando não estiverem presentes na mesma linha do "
+    "detalhe.\n\n"
+    "Não remova informação relevante do texto da descrição.\n\n"
+    "Se houver totais (ex.: TOTAL NET WEIGHT, TOTAL GROSS WEIGHT, MEASUREMENT, "
+    "TOTAL: 32 PALLETS), preencha totals_detected.\n\n"
+    "Validação\n\n"
+    "Cada objeto em products[].details[] deve ter pelo menos um de: size_spec, "
+    "qty_pc, net_weight_kg, gross_weight_kg, volume_cbm.\n\n"
+    "products[].description nunca pode ser vazia.\n\n"
+    "JSON válido, sem texto extra.\n\n"
+    "Entrada:\n\n"
+    "raw_text: {TEXTO_BRUTO}\n\n"
+    "normalized_headers: {NORMALIZED_HEADERS}"
+)
 
-    Parameters
-    ----------
-    document:
-        Full text of the source document.
-    product_rules:
-        Mapping of product field names to extraction rules.  Each rule should
-        instruct the model to return one value per line.
-    knowledge_base:
-        Iterable of text chunks used for retrieval.
+# Aliases used to map header names found in documents to normalized keys.
+HEADER_ALIASES = {
+    "no": {"no.", "no"},
+    "description": {"description", "desc", "dbscription", "descrição"},
+    "size_spec": {"size", "sizeqty", "sizes"},
+    "qty_pc": {"qty.", "qty", "qty(pc)", "qty (pc)", "qty.(pc)"},
+    "pcs_per_ctn": {"pcs/ctn", "pcs / ctn", "pcsctn"},
+    "ctn_per_plt": {"ctn/plt", "ctn / plt", "ctnplt"},
+    "plts": {"plts", "plt", "pallets"},
+    "net_weight_kg": {"n.w. (kgs)", "nw", "n.w.", "n.w.(kgs)"},
+    "gross_weight_kg": {"g.w. (kgs)", "gw", "g.w.", "g.w.(kgs)"},
+    "volume_cbm": {"volume (cbm)", "cbm", "cblvt", "cbivt", "cbrvr"},
+}
 
-    Returns
-    -------
-    list of dict
-        A list where each element is a dictionary representing a product and
-        containing the fields specified in ``product_rules``.
-    """
 
-    extracted = {}
-    max_len = 0
-    for field_name, rules in product_rules.items():
-        value = identify_field(field_name, document, rules, knowledge_base)
-        items = [item.strip() for item in value.splitlines() if item.strip()]
-        extracted[field_name] = items
-        if len(items) > max_len:
-            max_len = len(items)
+def _normalize_header(value: str) -> str:
+    """Return a case- and accent-insensitive representation of ``value``."""
 
-    products = []
-    for i in range(max_len):
-        product = {}
-        for field_name, values in extracted.items():
-            product[field_name] = values[i] if i < len(values) else None
-        products.append(product)
+    import unicodedata
 
-    return products
+    normalized = unicodedata.normalize("NFD", value)
+    without_accents = "".join(
+        c for c in normalized if unicodedata.category(c) != "Mn"
+    )
+    return without_accents.lower().strip()
+
+
+def extract_product_headers(document: str, knowledge_base):
+    """Identify product table headers and map them to normalized names."""
+
+    import re
+    rules = PRODUCT_HEADERS_PROMPT.replace("{TEXTO_BRUTO}", document)
+    response = identify_field("product_headers", "", rules, knowledge_base)
+    headers = [h.strip() for h in re.split(r"[,\n]", response) if h.strip()]
+
+    mapping = {}
+    normalized_headers = []
+    for header in headers:
+        norm = _normalize_header(header)
+        normalized = None
+        for key, aliases in HEADER_ALIASES.items():
+            if norm in aliases:
+                normalized = key
+                break
+        if not normalized:
+            normalized = norm
+        mapping[header] = normalized
+        if normalized not in normalized_headers:
+            normalized_headers.append(normalized)
+
+    return {
+        "raw_headers_detected": headers,
+        "normalized_headers": normalized_headers,
+        "mapping": mapping,
+    }
+
+
+def _convert_number(value):
+    """Convert numeric strings to ``int`` or ``float`` when possible."""
+
+    if isinstance(value, str):
+        value = value.replace(".", "").replace(",", ".") if value.count(",") else value
+        try:
+            if "." in value:
+                return float(value)
+            return int(value)
+        except ValueError:
+            return value.strip()
+    return value
+
+
+def extract_products(document: str, headers: dict, knowledge_base):
+    """Extract structured product data based on ``headers``."""
+
+    import json
+
+    normalized = json.dumps(headers.get("normalized_headers", []))
+    rules = PRODUCT_ITEMS_PROMPT.replace("{TEXTO_BRUTO}", document).replace(
+        "{NORMALIZED_HEADERS}", normalized
+    )
+    response = identify_field("products", "", rules, knowledge_base)
+
+    try:
+        data = json.loads(response)
+    except Exception:
+        data = {"products": [], "totals_detected": {}}
+
+    for product in data.get("products", []):
+        details = []
+        seq_no = 1
+        for detail in product.get("details", []):
+            detail["seq_no"] = seq_no
+            seq_no += 1
+            details.append({k: _convert_number(v) for k, v in detail.items()})
+        product["details"] = details
+
+    totals = data.get("totals_detected", {})
+    data["totals_detected"] = {k: _convert_number(v) for k, v in totals.items()}
+
+    return data
+
+
+def identify_products(document: str, knowledge_base):
+    """High level helper that extracts headers and then products."""
+
+    headers = extract_product_headers(document, knowledge_base)
+    return extract_products(document, headers, knowledge_base)

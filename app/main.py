@@ -4,7 +4,12 @@ import tempfile
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from typing import Dict, List
 
-from .agents import identify_fields, identify_products, select_relevant_chunks
+from .agents import (
+    identify_fields,
+    select_relevant_chunks,
+    extract_product_headers,
+    extract_products,
+)
 
 try:  # pragma: no cover - handled via tests
     from PyPDF2 import PdfReader
@@ -48,13 +53,6 @@ FIELD_RULES: Dict[str, str] = {
         "justificar ou explicar."
     ),
 }
-
-PRODUCT_RULES: Dict[str, str] = {
-    "descricao": "Liste as descrições dos produtos, uma por linha, na ordem em que aparecem.",
-    "quantidade": "Liste a quantidade de cada produto, uma por linha, seguindo a mesma ordem.",
-    "tamanho": "Liste o tamanho ou dimensão de cada produto, uma por linha, seguindo a mesma ordem.",
-}
-
 
 def _extract_text(content: bytes, filename: str) -> str:
     """Extract text from ``content`` using PDF parsing or OCR.
@@ -124,5 +122,6 @@ async def upload_invoice(file: UploadFile = File(...)):
     vector_store.add_document(text)
 
     fields = identify_fields(text, FIELD_RULES, vector_store.chunks)
-    fields["produtos"] = identify_products(text, PRODUCT_RULES, vector_store.chunks)
+    headers = extract_product_headers(text, vector_store.chunks)
+    fields["produtos"] = extract_products(text, headers, vector_store.chunks)
     return {"filename": file.filename, "fields": fields}

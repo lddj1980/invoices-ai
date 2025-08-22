@@ -16,6 +16,8 @@ from app.agents import (
     select_relevant_chunks,
     identify_field,
     identify_fields,
+    extract_product_headers,
+    extract_products,
     identify_products,
 )
 from app.main import FIELD_RULES
@@ -147,26 +149,97 @@ def test_identify_fields_invokes_identify_field(monkeypatch):
     ]
 
 
-def test_identify_products_zips_fields(monkeypatch):
-    calls = {}
-
-    def fake_identify_field(field_name, document, rules, knowledge_base):
-        calls[field_name] = (document, rules, knowledge_base)
-        if field_name == "descricao":
-            return "A\nB"
-        if field_name == "quantidade":
-            return "1\n2"
-        if field_name == "tamanho":
-            return "S\nM"
+def test_extract_product_headers_maps_aliases(monkeypatch):
+    def fake_identify_field(field_name, document, rules, kb):
+        assert field_name == "product_headers"
+        return "NO., DBSCRIPTION, QTY(PC), G.W.(KGs)"
 
     monkeypatch.setattr("app.agents.identify_field", fake_identify_field)
 
-    rules = {"descricao": "d", "quantidade": "q", "tamanho": "t"}
-    result = identify_products("doc", rules, ["kb"])
-
-    assert result == [
-        {"descricao": "A", "quantidade": "1", "tamanho": "S"},
-        {"descricao": "B", "quantidade": "2", "tamanho": "M"},
+    result = extract_product_headers("doc", ["kb"])
+    assert result["raw_headers_detected"] == [
+        "NO.",
+        "DBSCRIPTION",
+        "QTY(PC)",
+        "G.W.(KGs)",
     ]
-    for field_name in rules:
-        assert calls[field_name] == ("doc", rules[field_name], ["kb"])
+    assert result["mapping"]["NO."] == "no"
+    assert result["mapping"]["DBSCRIPTION"] == "description"
+    assert result["mapping"]["QTY(PC)"] == "qty_pc"
+    assert result["mapping"]["G.W.(KGs)"] == "gross_weight_kg"
+
+
+def test_extract_products_parses_details_and_totals(monkeypatch):
+    headers = {
+        "raw_headers_detected": ["NO.", "DESC", "QTY(PC)", "N.W.(KGs)", "G.W.(KGs)"],
+        "normalized_headers": [
+            "no",
+            "description",
+            "qty_pc",
+            "net_weight_kg",
+            "gross_weight_kg",
+        ],
+        "mapping": {
+            "NO.": "no",
+            "DESC": "description",
+            "QTY(PC)": "qty_pc",
+            "N.W.(KGs)": "net_weight_kg",
+            "G.W.(KGs)": "gross_weight_kg",
+        },
+    }
+
+    def fake_identify_field(field_name, document, rules, kb):
+        import json
+
+        assert field_name == "products"
+        return json.dumps(
+            {
+                "products": [
+                    {
+                        "no": "1",
+                        "description": "A",
+                        "details": [
+                            {"size_spec": "M", "qty_pc": "10", "net_weight_kg": "5,0"},
+                            {"size_spec": "L", "qty_pc": "20", "net_weight_kg": "10"},
+                        ],
+                    }
+                ],
+                "totals_detected": {"total_net_weight_kg": "15", "pallets_count": "3"},
+            }
+        )
+
+    monkeypatch.setattr("app.agents.identify_field", fake_identify_field)
+
+    result = extract_products("doc", headers, ["kb"])
+    assert result["products"][0]["no"] == "1"
+    assert result["products"][0]["details"][0]["seq_no"] == 1
+    assert result["products"][0]["details"][1]["seq_no"] == 2
+    assert result["products"][0]["details"][0]["qty_pc"] == 10
+    assert result["products"][0]["details"][0]["net_weight_kg"] == 5.0
+    assert result["totals_detected"]["total_net_weight_kg"] == 15
+    assert result["totals_detected"]["pallets_count"] == 3
+
+
+def test_identify_products_combines(monkeypatch):
+    calls = []
+    headers = {"raw_headers_detected": [], "normalized_headers": [], "mapping": {}}
+
+    def fake_extract_product_headers(document, kb):
+        calls.append(("headers", document, kb))
+        return headers
+
+    def fake_extract_products(document, hdrs, kb):
+        calls.append(("products", document, hdrs, kb))
+        return {"products": [], "totals_detected": {}}
+
+    monkeypatch.setattr(
+        "app.agents.extract_product_headers", fake_extract_product_headers
+    )
+    monkeypatch.setattr("app.agents.extract_products", fake_extract_products)
+
+    result = identify_products("doc", ["kb"])
+    assert result == {"products": [], "totals_detected": {}}
+    assert calls == [
+        ("headers", "doc", ["kb"]),
+        ("products", "doc", headers, ["kb"]),
+    ]
