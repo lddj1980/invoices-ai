@@ -14,6 +14,16 @@ from app.main import app, vector_store
 PDF_WITH_TEXT = b"""%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n4 0 obj<</Length 55>>stream\nBT\n/F1 24 Tf\n50 150 Td\n(FOB sale condition: FOB) Tj\nET\nendstream\nendobj\n5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\nxref\n0 6\n0000000000 65535 f \n0000000010 00000 n \n0000000079 00000 n \n0000000178 00000 n \n0000000401 00000 n \n0000000514 00000 n \ntrailer<</Size 6/Root 1 0 R>>\nstartxref\n611\n%%EOF"""
 
 
+def test_upload_invoice_returns_text():
+    client = TestClient(app)
+    response = client.post(
+        '/invoice-text',
+        files={'file': ('invoice.pdf', PDF_WITH_TEXT, 'application/pdf')},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert 'FOB sale condition: FOB' in body['text']
+
 def test_upload_invoice_extracts_fields(monkeypatch):
     client = TestClient(app)
 
