@@ -36,15 +36,28 @@ def test_upload_invoice_extracts_fields(monkeypatch):
             "nome_do_exportador": "ACME LTDA",
         }
 
-    def fake_identify_products(document, product_rules, knowledge_base):
-        return [
-            {"descricao": "ABC", "quantidade": "1", "tamanho": "S"},
-            {"descricao": "DEF", "quantidade": "2", "tamanho": "M"},
-        ]
+    def fake_extract_product_headers(document, knowledge_base):
+        return {
+            "raw_headers_detected": [],
+            "normalized_headers": [],
+            "mapping": {},
+        }
+
+    def fake_extract_products(document, headers, knowledge_base):
+        return {
+            "products": [
+                {"no": 1, "description": "ABC", "details": []},
+                {"no": 2, "description": "DEF", "details": []},
+            ],
+            "totals_detected": {},
+        }
 
     vector_store.chunks = []
     monkeypatch.setattr("app.main.identify_fields", fake_identify_fields)
-    monkeypatch.setattr("app.main.identify_products", fake_identify_products)
+    monkeypatch.setattr(
+        "app.main.extract_product_headers", fake_extract_product_headers
+    )
+    monkeypatch.setattr("app.main.extract_products", fake_extract_products)
 
     response = client.post(
         "/invoices", files={"file": ("invoice.pdf", PDF_WITH_TEXT, "application/pdf")}
@@ -54,7 +67,7 @@ def test_upload_invoice_extracts_fields(monkeypatch):
     assert body["fields"]["sales_condition"] == "FOB"
     assert body["fields"]["exportador_fabricante"] == "não"
     assert body["fields"]["nome_do_exportador"] == "ACME LTDA"
-    assert body["fields"]["produtos"][0]["descricao"] == "ABC"
+    assert body["fields"]["produtos"]["products"][0]["description"] == "ABC"
     assert vector_store.chunks  # ensure document was added
 
 
@@ -78,7 +91,14 @@ def test_upload_invoice_uses_ocr_when_no_text(monkeypatch):
     monkeypatch.setattr(
         "app.main.identify_fields", lambda *args, **kwargs: {"sales_condition": "FOB"}
     )
-    monkeypatch.setattr("app.main.identify_products", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        "app.main.extract_product_headers",
+        lambda *args, **kwargs: {"raw_headers_detected": [], "normalized_headers": [], "mapping": {}},
+    )
+    monkeypatch.setattr(
+        "app.main.extract_products",
+        lambda *args, **kwargs: {"products": [], "totals_detected": {}},
+    )
     monkeypatch.setattr("app.main.PdfReader", DummyPdfReader)
     monkeypatch.setitem(
         sys.modules,
