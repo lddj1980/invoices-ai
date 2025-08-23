@@ -243,3 +243,111 @@ async def invoices_gpt(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return {"file_id": file_id, "result": result_text}
+
+@app.post("/invoices-gpt-pdf")
+async def invoices_gpt_pdf(file: UploadFile = File(...)):
+    """
+    Upload de um PDF de invoice/nota fiscal e extração de produtos via OpenAI.
+    1) Faz upload do PDF para a Files API (purpose='assistants')
+    2) Chama o Responses API (model='gpt-5') referenciando o file_id em 'input_file'
+    3) Retorna o texto bruto da resposta do modelo
+    """
+    logger.info("/invoices-gpt-pdf called with file '%s'", file.filename)
+
+    # Verificação básica de tipo/extensão
+    if not file.filename.lower().endswith(".pdf"):
+        logger.error("File is not a PDF: %s", file.filename)
+        raise HTTPException(status_code=400, detail="Envie um arquivo PDF.")
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        logger.error("OPENAI_API_KEY is not set")
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not set")
+
+    try:
+        from openai import OpenAI
+    except Exception as exc:  # pragma: no cover
+        logger.error("openai package is not available: %s", exc)
+        raise HTTPException(status_code=500, detail="openai package is not installed") from exc
+
+    client = OpenAI(api_key=api_key)
+
+    # Lê o conteúdo do PDF
+    contents = await file.read()
+    logger.debug("Read %d bytes from uploaded PDF", len(contents))
+
+    try:
+        # 1) Upload do PDF (purpose='assistants' é o recomendado para usar como 'input_file')
+        uploaded = client.files.create(file=(file.filename, contents), purpose="assistants")
+        file_id = uploaded.id
+        logger.info("PDF uploaded to OpenAI with id %s", file_id)
+
+        # 2) Chamada ao Responses API usando 'input_file'
+        # Observação: mantive a intenção do endpoint /invoices-gpt (lista de produtos a partir do arquivo)
+        response = client.responses.create(
+            model="gpt-5",
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                "gerar uma lista de produtos a partir deste PDF. "
+                                "Se possível, retorne em JSON com campos como "
+                                "descricao, quantidade, unidade, preco_unitario, moeda e total."
+                            ),
+                        },
+                        {
+                            "type": "input_file",
+                            "file_id": file_id,
+                        },
+                    ],
+                }
+            ],
+        )
+
+        # 3) Normaliza a saída em texto, como no endpoint /invoices-gpt
+        result_text = getattr(response, "output_text", None)
+        if result_text is None:
+            try:
+                result_text = response.output[0].content[0].text
+            except Exception:
+                result_text = str(response)
+
+        logger.debug("Model response (PDF): %s", result_text)
+
+    except Exception as exc:
+        logger.error("OpenAI API call (PDF) failed: %s", exc)
+
+        # Fallback leve: tenta extrair texto localmente e mandar como input_text (sem anexar arquivo).
+        # Útil quando o upload/consumo de arquivo remoto falhar, porém pode estourar tokens em PDFs longos.
+        try:
+            text = _extract_text(contents, file.filename)
+            logger.info("Local text extraction succeeded with %d chars; sending as input_text fallback", len(text))
+            response = client.responses.create(
+                model="gpt-5",
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": (
+                                    "gerar uma lista de produtos a partir do conteúdo a seguir (extraído de um PDF). "
+                                    "Se possível, retorne em JSON com campos como descricao, quantidade, unidade, "
+                                    "preco_unitario, moeda e total. Conteúdo:\n\n" + text
+                                ),
+                            }
+                        ],
+                    }
+                ],
+            )
+            result_text = getattr(response, "output_text", None) or str(response)
+            file_id = None  # não houve file_id válido nessa rota de fallback
+        except Exception as exc_inner:
+            logger.error("Fallback local extraction also failed: %s", exc_inner)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return {"file_id": file_id, "result": result_text}
+
