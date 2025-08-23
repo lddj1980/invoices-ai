@@ -224,7 +224,7 @@ async def invoices_gpt(file: UploadFile = File(...)):
                         },
                         {
                             "type": "input_image",
-                            "image_file": {"file_id": file_id},
+                            "image": {"file_id": file_id},
                         },
                     ],
                 }
