@@ -85,6 +85,14 @@ def test_identify_field_requires_model(monkeypatch):
         identify_field("field", "doc", "rules", ["chunk"])
 
 
+def test_identify_field_missing_openai_package(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("OPENAI_API_MODEL", "gpt-test")
+    monkeypatch.delitem(sys.modules, "openai", raising=False)
+    with pytest.raises(EnvironmentError):
+        identify_field("field", "doc", "rules", ["chunk"])
+
+
 def test_field_rules_has_exportador_fabricante():
     assert "exportador_fabricante" in FIELD_RULES
 
