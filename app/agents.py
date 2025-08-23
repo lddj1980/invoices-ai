@@ -1,3 +1,8 @@
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
 SALE_CONDITIONS = {
     "CFR": "Cost and Freight",
     "CIF": "Cost, Insurance and Freight",
@@ -39,9 +44,13 @@ def normalize_sales_condition(value: str) -> str:
     ValueError
         If ``value`` is not a supported sales condition.
     """
+    logger.info("Normalizing sales condition: %s", value)
     code = value.strip().upper()
+    logger.debug("Normalized code: %s", code)
     if code in SALE_CONDITIONS:
+        logger.info("Sales condition recognized: %s", code)
         return code
+    logger.error("Unknown sales condition: %s", code)
     raise ValueError("Condição de venda desconhecida")
 
 
@@ -66,7 +75,9 @@ def exporter_is_manufacturer(text: str) -> bool:
 
     import re
 
+    logger.info("Checking if exporter is also manufacturer (text length=%d)", len(text))
     normalized_text = " ".join(text.lower().split())
+    logger.debug("Normalized text: %s", normalized_text)
 
     patterns = [
         r"the\s+exporter\s+is\s+the\s+same\s+as\s+the\s+manufacturer",
@@ -79,13 +90,17 @@ def exporter_is_manufacturer(text: str) -> bool:
         r"o\s+exportador\s+é\s+o\s+fabricante",
     ]
 
-    return any(re.search(pattern, normalized_text) for pattern in patterns)
+    result = any(re.search(pattern, normalized_text) for pattern in patterns)
+    logger.debug("Exporter-manufacturer match: %s", result)
+    return result
 
 
 def exportador_fabricante(text: str) -> bool:
     """Convenience wrapper to keep a Portuguese friendly API name."""
-
-    return exporter_is_manufacturer(text)
+    logger.info("Calling exportador_fabricante")
+    result = exporter_is_manufacturer(text)
+    logger.info("exportador_fabricante result: %s", result)
+    return result
 
 
 def possible_company_names(text: str):
@@ -113,14 +128,19 @@ def possible_company_names(text: str):
     suffixes = r"(?:S\.A\.?|SA|LTDA|Ltda|LTD|Ltd|Inc\.?|INC|LLC|Corp\.?|Corporation|Company|Co\.?|GmbH)"
     pattern = re.compile(rf"\b([A-Z][A-Za-z0-9&.,'\s]+?{suffixes})\b")
 
+    logger.info("Extracting possible company names")
     names = []
     for line in text.splitlines():
         stripped = line.strip()
+        logger.debug("Processing line: %s", stripped)
         if not stripped or stripped.lower().startswith("to"):
             continue
         match = pattern.search(stripped)
         if match:
-            names.append(match.group(1).strip())
+            name = match.group(1).strip()
+            logger.debug("Found company name: %s", name)
+            names.append(name)
+    logger.info("Total company names found: %d", len(names))
     return names
 
 
@@ -148,12 +168,16 @@ def select_relevant_chunks(query: str, chunks, top_k: int = 3):
 
     from difflib import SequenceMatcher
 
+    logger.info("Selecting relevant chunks for query: %s", query)
     scored = [
         (SequenceMatcher(None, query.lower(), chunk.lower()).ratio(), chunk)
         for chunk in chunks
     ]
+    logger.debug("Scored %d chunks", len(scored))
     scored.sort(reverse=True)
-    return scored[:top_k]
+    top = scored[:top_k]
+    logger.debug("Top chunks: %s", top)
+    return top
 
 
 def identify_field(field_name: str, document: str, rules: str, knowledge_base):
@@ -181,37 +205,46 @@ def identify_field(field_name: str, document: str, rules: str, knowledge_base):
         The model's response for the requested field.
     """
 
+    logger.info("Identifying field '%s'", field_name)
+    logger.debug("Rules: %s", rules)
     import os
 
     api_key = os.getenv("OPENAI_API_KEY")
     model = os.getenv("OPENAI_API_MODEL")
     if not api_key:
+        logger.error("OPENAI_API_KEY is not set")
         raise EnvironmentError("OPENAI_API_KEY is not set")
     if not model:
+        logger.error("OPENAI_API_MODEL is not set")
         raise EnvironmentError("OPENAI_API_MODEL is not set")
 
-    # Import OpenAI lazily so tests can run without the package installed and
-    # instantiate a client using the new 1.x interface.
     from openai import OpenAI
 
     client = OpenAI(api_key=api_key)
 
     query = f"{field_name} {rules}".strip()
+    logger.debug("Query for relevant chunks: %s", query)
     relevant = select_relevant_chunks(query, knowledge_base)
+    logger.debug("Retrieved %d relevant chunks", len(relevant))
     if not relevant or relevant[0][0] < 0.3:
         context = document
+        logger.debug("Using full document as context")
     else:
         context = "\n---\n".join(chunk for _, chunk in relevant)
+        logger.debug("Context built from relevant chunks")
 
     prompt = (
         f"{rules}\n\nContext:\n{context}\n\nDocument:\n{document}\n"
         f"Extract the value for '{field_name}'."
     )
+    logger.debug("Prompt length: %d", len(prompt))
 
     response = client.chat.completions.create(
         model=model, messages=[{"role": "user", "content": prompt}]
     )
-    return response.choices[0].message.content.strip()
+    result = response.choices[0].message.content.strip()
+    logger.info("Field '%s' identified as: %s", field_name, result)
+    return result
 
 
 def identify_fields(
@@ -240,11 +273,15 @@ def identify_fields(
         extracted values.
     """
 
+    logger.info("Identifying multiple fields: %s", list(field_rules.keys()))
     results = {}
     for field_name, rules in field_rules.items():
+        logger.debug("Processing field: %s", field_name)
         results[field_name] = identify_field(
             field_name, document, rules, knowledge_base
         )
+        logger.debug("Result for %s: %s", field_name, results[field_name])
+    logger.info("Completed field identification")
     return results
 
 
@@ -366,24 +403,30 @@ def _normalize_header(value: str) -> str:
 
     import unicodedata
 
+    logger.debug("Normalizing header: %s", value)
     normalized = unicodedata.normalize("NFD", value)
     without_accents = "".join(
         c for c in normalized if unicodedata.category(c) != "Mn"
     )
-    return without_accents.lower().strip()
+    result = without_accents.lower().strip()
+    logger.debug("Normalized header result: %s", result)
+    return result
 
 
 def extract_product_headers(document: str, knowledge_base):
     """Identify product table headers and map them to normalized names."""
 
     import re
+    logger.info("Extracting product headers")
     rules = PRODUCT_HEADERS_PROMPT.replace("{TEXTO_BRUTO}", document)
     response = identify_field("product_headers", "", rules, knowledge_base)
+    logger.debug("LLM response for headers: %s", response)
     headers = [h.strip() for h in re.split(r"[,\n]", response) if h.strip()]
 
     mapping = {}
     normalized_headers = []
     for header in headers:
+        logger.debug("Processing header: %s", header)
         norm = _normalize_header(header)
         normalized = None
         for key, aliases in HEADER_ALIASES.items():
@@ -395,25 +438,34 @@ def extract_product_headers(document: str, knowledge_base):
         mapping[header] = normalized
         if normalized not in normalized_headers:
             normalized_headers.append(normalized)
+        logger.debug("Mapped '%s' to '%s'", header, normalized)
 
-    return {
+    result = {
         "raw_headers_detected": headers,
         "normalized_headers": normalized_headers,
         "mapping": mapping,
     }
+    logger.info("Header extraction result: %s", result)
+    return result
 
 
 def _convert_number(value):
     """Convert numeric strings to ``int`` or ``float`` when possible."""
-
+    logger.debug("Converting value: %s (%s)", value, type(value))
     if isinstance(value, str):
         value = value.replace(".", "").replace(",", ".") if value.count(",") else value
         try:
             if "." in value:
-                return float(value)
-            return int(value)
+                converted = float(value)
+            else:
+                converted = int(value)
+            logger.debug("Converted to numeric: %s", converted)
+            return converted
         except ValueError:
-            return value.strip()
+            stripped = value.strip()
+            logger.debug("Value not numeric, returning stripped: %s", stripped)
+            return stripped
+    logger.debug("Value not a string, returning as-is")
     return value
 
 
@@ -422,34 +474,46 @@ def extract_products(document: str, headers: dict, knowledge_base):
 
     import json
 
+    logger.info("Extracting products")
     normalized = json.dumps(headers.get("normalized_headers", []))
+    logger.debug("Normalized headers JSON: %s", normalized)
     rules = PRODUCT_ITEMS_PROMPT.replace("{TEXTO_BRUTO}", document).replace(
         "{NORMALIZED_HEADERS}", normalized
     )
     response = identify_field("products", "", rules, knowledge_base)
+    logger.debug("LLM response for products: %s", response)
 
     try:
         data = json.loads(response)
-    except Exception:
+        logger.debug("Parsed JSON data: %s", data)
+    except Exception as exc:
+        logger.warning("Failed to parse products JSON: %s", exc)
         data = {"products": [], "totals_detected": {}}
 
     for product in data.get("products", []):
+        logger.debug("Processing product: %s", product)
         details = []
         seq_no = 1
         for detail in product.get("details", []):
             detail["seq_no"] = seq_no
             seq_no += 1
-            details.append({k: _convert_number(v) for k, v in detail.items()})
+            converted = {k: _convert_number(v) for k, v in detail.items()}
+            logger.debug("Converted detail: %s", converted)
+            details.append(converted)
         product["details"] = details
 
     totals = data.get("totals_detected", {})
     data["totals_detected"] = {k: _convert_number(v) for k, v in totals.items()}
+    logger.info("Totals detected: %s", data.get("totals_detected"))
 
     return data
 
 
 def identify_products(document: str, knowledge_base):
     """High level helper that extracts headers and then products."""
-
+    logger.info("Identifying products from document")
     headers = extract_product_headers(document, knowledge_base)
-    return extract_products(document, headers, knowledge_base)
+    logger.debug("Headers extracted for products: %s", headers)
+    products = extract_products(document, headers, knowledge_base)
+    logger.debug("Products extracted: %s", products)
+    return products
