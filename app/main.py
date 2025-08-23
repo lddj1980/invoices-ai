@@ -12,6 +12,14 @@ from .agents import (
     extract_products,
 )
 
+# Optional image OCR helper. Imported lazily to avoid mandatory dependency on
+# OpenCV/Tesseract during normal operation or testing environments where these
+# heavy libraries might be absent.
+try:  # pragma: no cover - availability depends on runtime environment
+    from .ocr import image_to_text  # type: ignore
+except Exception:  # pragma: no cover
+    image_to_text = None  # type: ignore
+
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
@@ -117,6 +125,17 @@ def _extract_text(content: bytes, filename: str) -> str:
 
         logger.error("No text extracted from PDF")
         raise HTTPException(status_code=400, detail="Unable to extract text from PDF")
+
+    # Handle common image formats via Tesseract OCR if available
+    if filename.lower().endswith((".png", ".jpg", ".jpeg")) and image_to_text:
+        try:
+            text = image_to_text(content)
+            if text:
+                logger.debug("Text extracted via image OCR (%d chars)", len(text))
+                return text
+        except Exception as exc:
+            logger.error("Image OCR failed: %s", exc)
+            raise HTTPException(status_code=400, detail="Unable to extract text from image") from exc
 
     try:
         text = content.decode("utf-8")

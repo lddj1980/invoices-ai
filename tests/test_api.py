@@ -114,6 +114,28 @@ def test_upload_invoice_uses_ocr_when_no_text(monkeypatch):
     assert any("FOB" in chunk for chunk in vector_store.chunks)
 
 
+def test_upload_invoice_uses_image_ocr(monkeypatch):
+    """Ensure image uploads trigger the image OCR pathway."""
+    client = TestClient(app)
+
+    # Fake image bytes; actual content is irrelevant because OCR is monkeypatched.
+    image_bytes = b"notreallyanimage"
+
+    def fake_image_ocr(data: bytes) -> str:
+        assert data == image_bytes
+        return "FOB sale condition: FOB"
+
+    monkeypatch.setattr("app.main.image_to_text", fake_image_ocr)
+
+    response = client.post(
+        "/invoice-text",
+        files={"file": ("invoice.png", image_bytes, "image/png")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert "FOB sale condition" in body["text"]
+
+
 def test_upload_invoice_handles_env_error(monkeypatch):
     client = TestClient(app)
 
