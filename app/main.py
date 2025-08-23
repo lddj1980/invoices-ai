@@ -2,7 +2,7 @@ import io
 import os
 import tempfile
 import logging
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from typing import Dict, List
 
 from .agents import (
@@ -74,6 +74,18 @@ FIELD_RULES: Dict[str, str] = {
         "justificar ou explicar."
     ),
 }
+
+DEFAULT_PDF_PROMPT = (
+    "gerar uma lista de produtos a partir deste PDF. "
+    "Se possível, retorne em JSON com campos como "
+    "descricao, quantidade, unidade, preco_unitario, moeda e total."
+)
+
+DEFAULT_PDF_FALLBACK_PROMPT_PREFIX = (
+    "gerar uma lista de produtos a partir do conteúdo a seguir (extraído de um PDF). "
+    "Se possível, retorne em JSON com campos como descricao, quantidade, unidade, "
+    "preco_unitario, moeda e total. Conteúdo:\n\n"
+)
 
 def _extract_text(content: bytes, filename: str) -> str:
     """Extract text from ``content`` using PDF parsing or OCR.
@@ -245,7 +257,10 @@ async def invoices_gpt(file: UploadFile = File(...)):
     return {"file_id": file_id, "result": result_text}
 
 @app.post("/invoices-gpt-pdf")
-async def invoices_gpt_pdf(file: UploadFile = File(...)):
+async def invoices_gpt_pdf(
+    file: UploadFile = File(...),
+    prompt: str | None = Form(None),
+):
     """
     Upload de um PDF de invoice/nota fiscal e extração de produtos via OpenAI.
     1) Faz upload do PDF para a Files API (purpose='assistants')
@@ -276,6 +291,10 @@ async def invoices_gpt_pdf(file: UploadFile = File(...)):
     contents = await file.read()
     logger.debug("Read %d bytes from uploaded PDF", len(contents))
 
+    custom_prompt = prompt is not None
+    if prompt is None:
+        prompt = DEFAULT_PDF_PROMPT
+
     try:
         # 1) Upload do PDF (purpose='assistants' é o recomendado para usar como 'input_file')
         uploaded = client.files.create(file=(file.filename, contents), purpose="assistants")
@@ -290,18 +309,8 @@ async def invoices_gpt_pdf(file: UploadFile = File(...)):
                 {
                     "role": "user",
                     "content": [
-                        {
-                            "type": "input_text",
-                            "text": (
-                                "gerar uma lista de produtos a partir deste PDF. "
-                                "Se possível, retorne em JSON com campos como "
-                                "descricao, quantidade, unidade, preco_unitario, moeda e total."
-                            ),
-                        },
-                        {
-                            "type": "input_file",
-                            "file_id": file_id,
-                        },
+                        {"type": "input_text", "text": prompt},
+                        {"type": "input_file", "file_id": file_id},
                     ],
                 }
             ],
@@ -324,21 +333,20 @@ async def invoices_gpt_pdf(file: UploadFile = File(...)):
         # Útil quando o upload/consumo de arquivo remoto falhar, porém pode estourar tokens em PDFs longos.
         try:
             text = _extract_text(contents, file.filename)
-            logger.info("Local text extraction succeeded with %d chars; sending as input_text fallback", len(text))
+            logger.info(
+                "Local text extraction succeeded with %d chars; sending as input_text fallback",
+                len(text),
+            )
+            fallback_prompt = (
+                f"{prompt}\n\nConteúdo:\n\n{text}" if custom_prompt else DEFAULT_PDF_FALLBACK_PROMPT_PREFIX + text
+            )
             response = client.responses.create(
                 model="gpt-5",
                 input=[
                     {
                         "role": "user",
                         "content": [
-                            {
-                                "type": "input_text",
-                                "text": (
-                                    "gerar uma lista de produtos a partir do conteúdo a seguir (extraído de um PDF). "
-                                    "Se possível, retorne em JSON com campos como descricao, quantidade, unidade, "
-                                    "preco_unitario, moeda e total. Conteúdo:\n\n" + text
-                                ),
-                            }
+                            {"type": "input_text", "text": fallback_prompt}
                         ],
                     }
                 ],
