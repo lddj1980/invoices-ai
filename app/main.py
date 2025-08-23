@@ -1,6 +1,7 @@
 import io
 import os
 import tempfile
+import logging
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from typing import Dict, List
 
@@ -10,6 +11,9 @@ from .agents import (
     extract_product_headers,
     extract_products,
 )
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 try:  # pragma: no cover - handled via tests
     from PyPDF2 import PdfReader
@@ -21,7 +25,10 @@ app = FastAPI()
 
 def _split_into_chunks(text: str, chunk_size: int = 200) -> List[str]:
     """Split ``text`` into chunks of up to ``chunk_size`` characters."""
-    return [text[i : i + chunk_size] for i in range(0, len(text), chunk_size)]
+    logger.debug("Splitting text of length %d into chunks of size %d", len(text), chunk_size)
+    chunks = [text[i : i + chunk_size] for i in range(0, len(text), chunk_size)]
+    logger.debug("Generated %d chunks", len(chunks))
+    return chunks
 
 
 class InMemoryVectorStore:
@@ -33,13 +40,19 @@ class InMemoryVectorStore:
     """
 
     def __init__(self) -> None:
+        logger.debug("Initializing in-memory vector store")
         self.chunks: List[str] = []
 
     def add_document(self, text: str) -> None:
+        logger.info("Adding document with %d characters to vector store", len(text))
         self.chunks.extend(_split_into_chunks(text))
+        logger.debug("Vector store now holds %d chunks", len(self.chunks))
 
     def search(self, query: str, top_k: int = 3) -> List[str]:
-        return [chunk for _, chunk in select_relevant_chunks(query, self.chunks, top_k=top_k)]
+        logger.info("Searching vector store for query '%s' (top_k=%d)", query, top_k)
+        results = [chunk for _, chunk in select_relevant_chunks(query, self.chunks, top_k=top_k)]
+        logger.debug("Search returned %d chunks", len(results))
+        return results
 
 
 vector_store = InMemoryVectorStore()
@@ -62,7 +75,9 @@ def _extract_text(content: bytes, filename: str) -> str:
     UTF-8 text.
     """
 
+    logger.info("Extracting text from file '%s'", filename)
     if filename.lower().endswith(".pdf"):
+        logger.debug("File detected as PDF")
         if PdfReader is not None:
             try:
                 reader = PdfReader(io.BytesIO(content))
@@ -70,9 +85,10 @@ def _extract_text(content: bytes, filename: str) -> str:
                     page.extract_text() or "" for page in reader.pages
                 ).strip()
                 if text:
+                    logger.debug("Text extracted via PyPDF2 (%d chars)", len(text))
                     return text
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("PyPDF2 extraction failed: %s", exc)
 
         try:
             from paddleocr import PaddleOCR  # imported lazily
@@ -93,35 +109,50 @@ def _extract_text(content: bytes, filename: str) -> str:
                 if page
             ).strip()
             if text:
+                logger.debug("Text extracted via OCR (%d chars)", len(text))
                 return text
         except Exception as exc:
+            logger.error("OCR extraction failed: %s", exc)
             raise HTTPException(status_code=400, detail="Unable to extract text") from exc
 
+        logger.error("No text extracted from PDF")
         raise HTTPException(status_code=400, detail="Unable to extract text from PDF")
 
     try:
-        return content.decode("utf-8")
+        text = content.decode("utf-8")
+        logger.debug("Text extracted from non-PDF (%d chars)", len(text))
+        return text
     except UnicodeDecodeError as exc:
+        logger.error("Invalid file encoding: %s", exc)
         raise HTTPException(status_code=400, detail="Invalid file encoding") from exc
 
 
 @app.post("/invoice-text")
 async def upload_invoice_text(file: UploadFile = File(...)):
     """Upload an invoice and return only the extracted raw text."""
+    logger.info("/invoice-text called with file '%s'", file.filename)
     content = await file.read()
+    logger.debug("Read %d bytes from uploaded file", len(content))
     text = _extract_text(content, file.filename)
+    logger.info("Extracted %d characters of text", len(text))
     return {"filename": file.filename, "text": text}
 
 
 @app.post("/invoices")
 async def upload_invoice(file: UploadFile = File(...)):
     """Upload an invoice and extract relevant fields using RAG."""
+    logger.info("/invoices called with file '%s'", file.filename)
     content = await file.read()
+    logger.debug("Read %d bytes from uploaded file", len(content))
     text = _extract_text(content, file.filename)
+    logger.info("Text extraction produced %d characters", len(text))
 
     vector_store.add_document(text)
 
     fields = identify_fields(text, FIELD_RULES, vector_store.chunks)
+    logger.debug("Identified fields: %s", fields)
     headers = extract_product_headers(text, vector_store.chunks)
+    logger.debug("Extracted headers: %s", headers)
     fields["produtos"] = extract_products(text, headers, vector_store.chunks)
+    logger.debug("Extracted products: %s", fields["produtos"])
     return {"filename": file.filename, "fields": fields}
