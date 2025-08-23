@@ -112,3 +112,27 @@ def test_upload_invoice_uses_ocr_when_no_text(monkeypatch):
     assert response.status_code == 200
     assert vector_store.chunks  # document added even via OCR
     assert any("FOB" in chunk for chunk in vector_store.chunks)
+
+
+def test_upload_invoice_handles_env_error(monkeypatch):
+    client = TestClient(app)
+
+    def fake_identify_fields(document, field_rules, knowledge_base):
+        return {}
+
+    def fake_extract_product_headers(document, knowledge_base):
+        return {"raw_headers_detected": [], "normalized_headers": [], "mapping": {}}
+
+    def raise_env_error(*args, **kwargs):
+        raise EnvironmentError("OPENAI_API_KEY is not set")
+
+    vector_store.chunks = []
+    monkeypatch.setattr("app.main.identify_fields", fake_identify_fields)
+    monkeypatch.setattr("app.main.extract_product_headers", fake_extract_product_headers)
+    monkeypatch.setattr("app.main.extract_products", raise_env_error)
+
+    response = client.post(
+        "/invoices", files={"file": ("invoice.pdf", PDF_WITH_TEXT, "application/pdf")}
+    )
+    assert response.status_code == 500
+    assert response.json()["detail"] == "OPENAI_API_KEY is not set"
