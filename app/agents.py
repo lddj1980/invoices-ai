@@ -217,8 +217,11 @@ def identify_field(field_name: str, document: str, rules: str, knowledge_base):
     if not model:
         logger.error("OPENAI_API_MODEL is not set")
         raise EnvironmentError("OPENAI_API_MODEL is not set")
-
-    from openai import OpenAI
+    try:
+        from openai import OpenAI
+    except Exception as exc:  # pragma: no cover - depends on environment
+        logger.error("openai package is not available: %s", exc)
+        raise EnvironmentError("openai package is not installed") from exc
 
     client = OpenAI(api_key=api_key)
 
