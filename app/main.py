@@ -148,11 +148,15 @@ async def upload_invoice(file: UploadFile = File(...)):
     logger.info("Text extraction produced %d characters", len(text))
 
     vector_store.add_document(text)
+    try:
+        fields = identify_fields(text, FIELD_RULES, vector_store.chunks)
+        logger.debug("Identified fields: %s", fields)
+        headers = extract_product_headers(text, vector_store.chunks)
+        logger.debug("Extracted headers: %s", headers)
+        fields["produtos"] = extract_products(text, headers, vector_store.chunks)
+        logger.debug("Extracted products: %s", fields["produtos"])
+    except EnvironmentError as exc:
+        logger.error("Environment configuration error: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    fields = identify_fields(text, FIELD_RULES, vector_store.chunks)
-    logger.debug("Identified fields: %s", fields)
-    headers = extract_product_headers(text, vector_store.chunks)
-    logger.debug("Extracted headers: %s", headers)
-    fields["produtos"] = extract_products(text, headers, vector_store.chunks)
-    logger.debug("Extracted products: %s", fields["produtos"])
     return {"filename": file.filename, "fields": fields}
