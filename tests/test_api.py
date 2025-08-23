@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 # Ensure project root on path
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from app.main import app, vector_store
+from app.main import app, vector_store, DEFAULT_PDF_PROMPT
 
 
 PDF_WITH_TEXT = b"""%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n4 0 obj<</Length 55>>stream\nBT\n/F1 24 Tf\n50 150 Td\n(FOB sale condition: FOB) Tj\nET\nendstream\nendobj\n5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\nxref\n0 6\n0000000000 65535 f \n0000000010 00000 n \n0000000079 00000 n \n0000000178 00000 n \n0000000401 00000 n \n0000000514 00000 n \ntrailer<</Size 6/Root 1 0 R>>\nstartxref\n611\n%%EOF"""
@@ -158,3 +158,56 @@ def test_upload_invoice_handles_env_error(monkeypatch):
     )
     assert response.status_code == 500
     assert response.json()["detail"] == "OPENAI_API_KEY is not set"
+
+
+def test_invoices_gpt_pdf_accepts_custom_prompt(monkeypatch):
+    client = TestClient(app)
+
+    class DummyClient:
+        def __init__(self, *a, **k):
+            self.files = SimpleNamespace(create=lambda file, purpose: SimpleNamespace(id="fid"))
+
+            def create_response(model, input):
+                assert input[0]["content"][0]["text"] == "custom"
+                return SimpleNamespace(output_text="ok")
+
+            self.responses = SimpleNamespace(create=create_response)
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=lambda api_key: DummyClient()))
+
+    response = client.post(
+        "/invoices-gpt-pdf",
+        data={"prompt": "custom"},
+        files={"file": ("invoice.pdf", PDF_WITH_TEXT, "application/pdf")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["file_id"] == "fid"
+    assert body["result"] == "ok"
+
+
+def test_invoices_gpt_pdf_uses_default_prompt(monkeypatch):
+    client = TestClient(app)
+
+    class DummyClient:
+        def __init__(self, *a, **k):
+            self.files = SimpleNamespace(create=lambda file, purpose: SimpleNamespace(id="fid"))
+
+            def create_response(model, input):
+                assert input[0]["content"][0]["text"] == DEFAULT_PDF_PROMPT
+                return SimpleNamespace(output_text="ok")
+
+            self.responses = SimpleNamespace(create=create_response)
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=lambda api_key: DummyClient()))
+
+    response = client.post(
+        "/invoices-gpt-pdf",
+        files={"file": ("invoice.pdf", PDF_WITH_TEXT, "application/pdf")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["file_id"] == "fid"
+    assert body["result"] == "ok"
