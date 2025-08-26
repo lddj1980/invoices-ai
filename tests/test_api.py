@@ -165,26 +165,47 @@ def test_invoices_gpt_pdf_accepts_custom_prompt(monkeypatch):
 
     class DummyClient:
         def __init__(self, *a, **k):
-            self.files = SimpleNamespace(create=lambda file, purpose: SimpleNamespace(id="fid"))
+            self.created = []
+            self.deleted = []
+
+            def create_file(file, purpose):
+                idx = len(self.created) + 1
+                fid = f"fid{idx}"
+                self.created.append(fid)
+                return SimpleNamespace(id=fid)
+
+            def delete_file(fid):
+                self.deleted.append(fid)
 
             def create_response(model, input):
-                assert input[0]["content"][0]["text"] == "custom"
+                content = input[0]["content"]
+                assert content[0]["text"] == "custom"
+                assert content[1] == {"type": "input_file", "file_id": "fid1"}
+                assert content[2] == {"type": "input_file", "file_id": "fid2"}
                 return SimpleNamespace(output_text="ok")
 
+            self.files = SimpleNamespace(create=create_file, delete=delete_file)
             self.responses = SimpleNamespace(create=create_response)
 
+    dummy_client = DummyClient()
     monkeypatch.setenv("OPENAI_API_KEY", "test")
-    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=lambda api_key: DummyClient()))
+    monkeypatch.setitem(
+        sys.modules, "openai", SimpleNamespace(OpenAI=lambda api_key: dummy_client)
+    )
 
     response = client.post(
         "/invoices-gpt-pdf",
         data={"prompt": "custom"},
-        files={"file": ("invoice.pdf", PDF_WITH_TEXT, "application/pdf")},
+        files={
+            "packing_list": ("packing.pdf", PDF_WITH_TEXT, "application/pdf"),
+            "invoice": ("invoice.pdf", PDF_WITH_TEXT, "application/pdf"),
+        },
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["file_id"] == "fid"
+    assert body["file_ids"] == {"packing_list": "fid1", "invoice": "fid2"}
     assert body["result"] == "ok"
+    assert dummy_client.deleted == ["fid1", "fid2"]
 
 
 def test_invoices_gpt_pdf_uses_default_prompt(monkeypatch):
@@ -192,22 +213,43 @@ def test_invoices_gpt_pdf_uses_default_prompt(monkeypatch):
 
     class DummyClient:
         def __init__(self, *a, **k):
-            self.files = SimpleNamespace(create=lambda file, purpose: SimpleNamespace(id="fid"))
+            self.created = []
+            self.deleted = []
+
+            def create_file(file, purpose):
+                idx = len(self.created) + 1
+                fid = f"fid{idx}"
+                self.created.append(fid)
+                return SimpleNamespace(id=fid)
+
+            def delete_file(fid):
+                self.deleted.append(fid)
 
             def create_response(model, input):
-                assert input[0]["content"][0]["text"] == DEFAULT_PDF_PROMPT
+                content = input[0]["content"]
+                assert content[0]["text"] == DEFAULT_PDF_PROMPT
+                assert content[1]["file_id"] == "fid1"
+                assert content[2]["file_id"] == "fid2"
                 return SimpleNamespace(output_text="ok")
 
+            self.files = SimpleNamespace(create=create_file, delete=delete_file)
             self.responses = SimpleNamespace(create=create_response)
 
+    dummy_client = DummyClient()
     monkeypatch.setenv("OPENAI_API_KEY", "test")
-    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=lambda api_key: DummyClient()))
+    monkeypatch.setitem(
+        sys.modules, "openai", SimpleNamespace(OpenAI=lambda api_key: dummy_client)
+    )
 
     response = client.post(
         "/invoices-gpt-pdf",
-        files={"file": ("invoice.pdf", PDF_WITH_TEXT, "application/pdf")},
+        files={
+            "packing_list": ("packing.pdf", PDF_WITH_TEXT, "application/pdf"),
+            "invoice": ("invoice.pdf", PDF_WITH_TEXT, "application/pdf"),
+        },
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["file_id"] == "fid"
+    assert body["file_ids"] == {"packing_list": "fid1", "invoice": "fid2"}
     assert body["result"] == "ok"
+    assert dummy_client.deleted == ["fid1", "fid2"]
