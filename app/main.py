@@ -258,21 +258,27 @@ async def invoices_gpt(file: UploadFile = File(...)):
 
 @app.post("/invoices-gpt-pdf")
 async def invoices_gpt_pdf(
-    file: UploadFile = File(...),
+    packing_list: UploadFile = File(...),
+    invoice: UploadFile = File(...),
     prompt: str | None = Form(None),
 ):
+    """Upload de dois PDFs (packing list e faturamento) e extração de produtos via OpenAI.
+
+    Ambos os arquivos são enviados para a Files API e referenciados na chamada ao
+    Responses API. Após o processamento, todos os arquivos enviados são removidos
+    da OpenAI via DELETE.
     """
-    Upload de um PDF de invoice/nota fiscal e extração de produtos via OpenAI.
-    1) Faz upload do PDF para a Files API (purpose='assistants')
-    2) Chama o Responses API (model='gpt-5') referenciando o file_id em 'input_file'
-    3) Retorna o texto bruto da resposta do modelo
-    """
-    logger.info("/invoices-gpt-pdf called with file '%s'", file.filename)
+    logger.info(
+        "/invoices-gpt-pdf called with packing_list '%s' and invoice '%s'",
+        packing_list.filename,
+        invoice.filename,
+    )
 
     # Verificação básica de tipo/extensão
-    if not file.filename.lower().endswith(".pdf"):
-        logger.error("File is not a PDF: %s", file.filename)
-        raise HTTPException(status_code=400, detail="Envie um arquivo PDF.")
+    for f in (packing_list, invoice):
+        if not f.filename.lower().endswith(".pdf"):
+            logger.error("File is not a PDF: %s", f.filename)
+            raise HTTPException(status_code=400, detail="Envie dois arquivos PDF.")
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -287,22 +293,37 @@ async def invoices_gpt_pdf(
 
     client = OpenAI(api_key=api_key)
 
-    # Lê o conteúdo do PDF
-    contents = await file.read()
-    logger.debug("Read %d bytes from uploaded PDF", len(contents))
+    # Lê os conteúdos dos PDFs
+    packing_contents = await packing_list.read()
+    invoice_contents = await invoice.read()
+    logger.debug(
+        "Read %d bytes for packing_list and %d bytes for invoice",
+        len(packing_contents),
+        len(invoice_contents),
+    )
 
     custom_prompt = prompt is not None
     if prompt is None:
         prompt = DEFAULT_PDF_PROMPT
 
+    uploaded_ids: dict[str, str] = {}
+    result_text = ""
     try:
-        # 1) Upload do PDF (purpose='assistants' é o recomendado para usar como 'input_file')
-        uploaded = client.files.create(file=(file.filename, contents), purpose="assistants")
-        file_id = uploaded.id
-        logger.info("PDF uploaded to OpenAI with id %s", file_id)
+        # Upload dos dois PDFs
+        upl_pack = client.files.create(
+            file=(packing_list.filename, packing_contents), purpose="assistants"
+        )
+        uploaded_ids["packing_list"] = upl_pack.id
+        upl_inv = client.files.create(
+            file=(invoice.filename, invoice_contents), purpose="assistants"
+        )
+        uploaded_ids["invoice"] = upl_inv.id
+        logger.info(
+            "Uploaded files to OpenAI with ids %s",
+            uploaded_ids,
+        )
 
-        # 2) Chamada ao Responses API usando 'input_file'
-        # Observação: mantive a intenção do endpoint /invoices-gpt (lista de produtos a partir do arquivo)
+        # Chamada ao Responses API referenciando ambos os arquivos
         response = client.responses.create(
             model="gpt-5",
             input=[
@@ -310,35 +331,37 @@ async def invoices_gpt_pdf(
                     "role": "user",
                     "content": [
                         {"type": "input_text", "text": prompt},
-                        {"type": "input_file", "file_id": file_id},
+                        {"type": "input_file", "file_id": uploaded_ids["packing_list"]},
+                        {"type": "input_file", "file_id": uploaded_ids["invoice"]},
                     ],
                 }
             ],
         )
 
-        # 3) Normaliza a saída em texto, como no endpoint /invoices-gpt
         result_text = getattr(response, "output_text", None)
         if result_text is None:
             try:
                 result_text = response.output[0].content[0].text
             except Exception:
                 result_text = str(response)
-
-        logger.debug("Model response (PDF): %s", result_text)
+        logger.debug("Model response (PDFs): %s", result_text)
 
     except Exception as exc:
         logger.error("OpenAI API call (PDF) failed: %s", exc)
 
-        # Fallback leve: tenta extrair texto localmente e mandar como input_text (sem anexar arquivo).
-        # Útil quando o upload/consumo de arquivo remoto falhar, porém pode estourar tokens em PDFs longos.
+        # Fallback: extrai texto localmente e envia como input_text
         try:
-            text = _extract_text(contents, file.filename)
+            pack_text = _extract_text(packing_contents, packing_list.filename)
+            inv_text = _extract_text(invoice_contents, invoice.filename)
+            combined = f"Packing List:\n{pack_text}\n\nInvoice:\n{inv_text}"
             logger.info(
                 "Local text extraction succeeded with %d chars; sending as input_text fallback",
-                len(text),
+                len(combined),
             )
             fallback_prompt = (
-                f"{prompt}\n\nConteúdo:\n\n{text}" if custom_prompt else DEFAULT_PDF_FALLBACK_PROMPT_PREFIX + text
+                f"{prompt}\n\nConteúdo:\n\n{combined}"
+                if custom_prompt
+                else DEFAULT_PDF_FALLBACK_PROMPT_PREFIX + combined
             )
             response = client.responses.create(
                 model="gpt-5",
@@ -352,10 +375,18 @@ async def invoices_gpt_pdf(
                 ],
             )
             result_text = getattr(response, "output_text", None) or str(response)
-            file_id = None  # não houve file_id válido nessa rota de fallback
+            uploaded_ids = {}  # nenhum file_id válido nessa rota de fallback
         except Exception as exc_inner:
             logger.error("Fallback local extraction also failed: %s", exc_inner)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        # Exclui todos os arquivos enviados para a API da OpenAI
+        for fid in uploaded_ids.values():
+            try:
+                client.files.delete(fid)
+                logger.info("Deleted OpenAI file %s", fid)
+            except Exception as exc_del:  # pragma: no cover
+                logger.warning("Failed to delete OpenAI file %s: %s", fid, exc_del)
 
-    return {"file_id": file_id, "result": result_text}
+    return {"file_ids": uploaded_ids or None, "result": result_text}
 
