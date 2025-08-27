@@ -88,7 +88,7 @@ def test_identify_field_requires_model(monkeypatch):
 def test_identify_field_missing_openai_package(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("OPENAI_API_MODEL", "gpt-test")
-    monkeypatch.delitem(sys.modules, "openai", raising=False)
+    monkeypatch.setitem(sys.modules, "openai", None)
     with pytest.raises(EnvironmentError):
         identify_field("field", "doc", "rules", ["chunk"])
 
@@ -124,7 +124,7 @@ def test_identify_field_uses_rules_and_fallback(monkeypatch):
         def __init__(self, *a, **k):
             self.chat = SimpleNamespace(completions=DummyCompletions())
 
-    dummy_openai = SimpleNamespace(OpenAI=lambda api_key: DummyClient())
+    dummy_openai = SimpleNamespace(OpenAI=lambda api_key, **kwargs: DummyClient())
 
     monkeypatch.setattr("app.agents.select_relevant_chunks", fake_select)
     monkeypatch.setitem(sys.modules, "openai", dummy_openai)

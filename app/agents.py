@@ -223,7 +223,7 @@ def identify_field(field_name: str, document: str, rules: str, knowledge_base):
         logger.error("openai package is not available: %s", exc)
         raise EnvironmentError("openai package is not installed") from exc
 
-    client = OpenAI(api_key=api_key)
+    client = OpenAI(api_key=api_key, timeout=20 * 60)
 
     query = f"{field_name} {rules}".strip()
     logger.debug("Query for relevant chunks: %s", query)

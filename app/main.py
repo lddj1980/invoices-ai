@@ -227,7 +227,7 @@ async def invoices_gpt(file: UploadFile = File(...)):
         logger.error("openai package is not available: %s", exc)
         raise HTTPException(status_code=500, detail="openai package is not installed") from exc
 
-    client = OpenAI(api_key=api_key)
+    client = OpenAI(api_key=api_key, timeout=20 * 60)
 
     # Read file contents
     contents = await file.read()
@@ -327,7 +327,7 @@ def _process_invoices_gpt_pdf(
         jobs[job_id]["result"] = "openai package is not installed"
         return
 
-    client = OpenAI(api_key=api_key)
+    client = OpenAI(api_key=api_key, timeout=20 * 60)
     custom_prompt = prompt is not None
     if prompt is None:
         prompt = DEFAULT_PDF_PROMPT

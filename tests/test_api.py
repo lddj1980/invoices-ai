@@ -190,7 +190,9 @@ def test_invoices_gpt_pdf_accepts_custom_prompt(monkeypatch):
     dummy_client = DummyClient()
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     monkeypatch.setitem(
-        sys.modules, "openai", SimpleNamespace(OpenAI=lambda api_key: dummy_client)
+        sys.modules,
+        "openai",
+        SimpleNamespace(OpenAI=lambda api_key, **kwargs: dummy_client),
     )
 
     response = client.post(
@@ -202,9 +204,11 @@ def test_invoices_gpt_pdf_accepts_custom_prompt(monkeypatch):
         },
     )
     assert response.status_code == 200
+    job_id = response.json()["job_id"]
+    response = client.get(f"/invoices-gpt-pdf/{job_id}")
     body = response.json()
-    assert body["file_ids"] == {"packing_list": "fid1", "invoice": "fid2"}
-    assert body["result"] == "ok"
+    assert body["result"]["file_ids"] == {"packing_list": "fid1", "invoice": "fid2"}
+    assert body["result"]["result"] == "ok"
     assert dummy_client.deleted == ["fid1", "fid2"]
 
 
@@ -238,7 +242,9 @@ def test_invoices_gpt_pdf_uses_default_prompt(monkeypatch):
     dummy_client = DummyClient()
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     monkeypatch.setitem(
-        sys.modules, "openai", SimpleNamespace(OpenAI=lambda api_key: dummy_client)
+        sys.modules,
+        "openai",
+        SimpleNamespace(OpenAI=lambda api_key, **kwargs: dummy_client),
     )
 
     response = client.post(
@@ -249,7 +255,9 @@ def test_invoices_gpt_pdf_uses_default_prompt(monkeypatch):
         },
     )
     assert response.status_code == 200
+    job_id = response.json()["job_id"]
+    response = client.get(f"/invoices-gpt-pdf/{job_id}")
     body = response.json()
-    assert body["file_ids"] == {"packing_list": "fid1", "invoice": "fid2"}
-    assert body["result"] == "ok"
+    assert body["result"]["file_ids"] == {"packing_list": "fid1", "invoice": "fid2"}
+    assert body["result"]["result"] == "ok"
     assert dummy_client.deleted == ["fid1", "fid2"]
