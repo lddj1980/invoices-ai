@@ -2,7 +2,9 @@ import io
 import os
 import tempfile
 import logging
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form
+import uuid
+import time
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks
 from typing import Dict, List
 
 from .agents import (
@@ -29,6 +31,18 @@ except Exception:  # pragma: no cover
     PdfReader = None
 
 app = FastAPI()
+
+# Simple in-memory job store for background processing results
+jobs: dict[str, dict] = {}
+JOBS_TTL_SECONDS = 3600
+
+
+def _cleanup_jobs() -> None:
+    """Remove jobs older than ``JOBS_TTL_SECONDS`` to prevent unbounded growth."""
+    now = time.time()
+    expired = [jid for jid, info in jobs.items() if now - info.get("created_at", now) > JOBS_TTL_SECONDS]
+    for jid in expired:
+        jobs.pop(jid, None)
 
 
 def _split_into_chunks(text: str, chunk_size: int = 200) -> List[str]:
@@ -256,44 +270,26 @@ async def invoices_gpt(file: UploadFile = File(...)):
 
     return {"file_id": file_id, "result": result_text}
 
+
 @app.post("/invoices-gpt-pdf")
 async def invoices_gpt_pdf(
+    background_tasks: BackgroundTasks,
     packing_list: UploadFile = File(...),
     invoice: UploadFile = File(...),
     prompt: str | None = Form(None),
 ):
-    """Upload de dois PDFs (packing list e faturamento) e extração de produtos via OpenAI.
-
-    Ambos os arquivos são enviados para a Files API e referenciados na chamada ao
-    Responses API. Após o processamento, todos os arquivos enviados são removidos
-    da OpenAI via DELETE.
-    """
+    """Agenda o processamento de dois PDFs e retorna um ``job_id`` para consulta."""
     logger.info(
         "/invoices-gpt-pdf called with packing_list '%s' and invoice '%s'",
         packing_list.filename,
         invoice.filename,
     )
 
-    # Verificação básica de tipo/extensão
     for f in (packing_list, invoice):
         if not f.filename.lower().endswith(".pdf"):
             logger.error("File is not a PDF: %s", f.filename)
             raise HTTPException(status_code=400, detail="Envie dois arquivos PDF.")
 
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        logger.error("OPENAI_API_KEY is not set")
-        raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not set")
-
-    try:
-        from openai import OpenAI
-    except Exception as exc:  # pragma: no cover
-        logger.error("openai package is not available: %s", exc)
-        raise HTTPException(status_code=500, detail="openai package is not installed") from exc
-
-    client = OpenAI(api_key=api_key)
-
-    # Lê os conteúdos dos PDFs
     packing_contents = await packing_list.read()
     invoice_contents = await invoice.read()
     logger.debug(
@@ -302,6 +298,36 @@ async def invoices_gpt_pdf(
         len(invoice_contents),
     )
 
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {"status": "pending", "result": None, "created_at": time.time()}
+    _cleanup_jobs()
+    background_tasks.add_task(
+        _process_invoices_gpt_pdf, job_id, packing_contents, invoice_contents, prompt
+    )
+    return {"job_id": job_id}
+
+
+def _process_invoices_gpt_pdf(
+    job_id: str,
+    packing_contents: bytes,
+    invoice_contents: bytes,
+    prompt: str | None,
+) -> None:
+    """Executa o processamento pesado e armazena o resultado em ``jobs``."""
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        jobs[job_id]["status"] = "error"
+        jobs[job_id]["result"] = "OPENAI_API_KEY is not set"
+        return
+
+    try:
+        from openai import OpenAI
+    except Exception:
+        jobs[job_id]["status"] = "error"
+        jobs[job_id]["result"] = "openai package is not installed"
+        return
+
+    client = OpenAI(api_key=api_key)
     custom_prompt = prompt is not None
     if prompt is None:
         prompt = DEFAULT_PDF_PROMPT
@@ -309,21 +335,16 @@ async def invoices_gpt_pdf(
     uploaded_ids: dict[str, str] = {}
     result_text = ""
     try:
-        # Upload dos dois PDFs
         upl_pack = client.files.create(
-            file=(packing_list.filename, packing_contents), purpose="assistants"
+            file=("packing_list.pdf", packing_contents), purpose="assistants"
         )
         uploaded_ids["packing_list"] = upl_pack.id
         upl_inv = client.files.create(
-            file=(invoice.filename, invoice_contents), purpose="assistants"
+            file=("invoice.pdf", invoice_contents), purpose="assistants"
         )
         uploaded_ids["invoice"] = upl_inv.id
-        logger.info(
-            "Uploaded files to OpenAI with ids %s",
-            uploaded_ids,
-        )
+        logger.info("Uploaded files to OpenAI with ids %s", uploaded_ids)
 
-        # Chamada ao Responses API referenciando ambos os arquivos
         response = client.responses.create(
             model="gpt-5",
             input=[
@@ -344,15 +365,12 @@ async def invoices_gpt_pdf(
                 result_text = response.output[0].content[0].text
             except Exception:
                 result_text = str(response)
-        logger.debug("Model response (PDFs): %s", result_text)
 
     except Exception as exc:
         logger.error("OpenAI API call (PDF) failed: %s", exc)
-
-        # Fallback: extrai texto localmente e envia como input_text
         try:
-            pack_text = _extract_text(packing_contents, packing_list.filename)
-            inv_text = _extract_text(invoice_contents, invoice.filename)
+            pack_text = _extract_text(packing_contents, "packing_list.pdf")
+            inv_text = _extract_text(invoice_contents, "invoice.pdf")
             combined = f"Packing List:\n{pack_text}\n\nInvoice:\n{inv_text}"
             logger.info(
                 "Local text extraction succeeded with %d chars; sending as input_text fallback",
@@ -375,18 +393,30 @@ async def invoices_gpt_pdf(
                 ],
             )
             result_text = getattr(response, "output_text", None) or str(response)
-            uploaded_ids = {}  # nenhum file_id válido nessa rota de fallback
+            uploaded_ids = {}
         except Exception as exc_inner:
             logger.error("Fallback local extraction also failed: %s", exc_inner)
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            jobs[job_id]["status"] = "error"
+            jobs[job_id]["result"] = str(exc_inner)
+            return
     finally:
-        # Exclui todos os arquivos enviados para a API da OpenAI
         for fid in uploaded_ids.values():
             try:
                 client.files.delete(fid)
-                logger.info("Deleted OpenAI file %s", fid)
-            except Exception as exc_del:  # pragma: no cover
+            except Exception as exc_del:
                 logger.warning("Failed to delete OpenAI file %s: %s", fid, exc_del)
 
-    return {"file_ids": uploaded_ids or None, "result": result_text}
+    jobs[job_id]["result"] = {"file_ids": uploaded_ids or None, "result": result_text}
+    jobs[job_id]["status"] = "done"
+
+
+@app.get("/invoices-gpt-pdf/{job_id}")
+async def get_invoices_gpt_pdf(job_id: str):
+    """Retorna o status e o resultado de um job."""
+    _cleanup_jobs()
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"status": job["status"], "result": job["result"]}
+
 
