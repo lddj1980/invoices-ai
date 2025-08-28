@@ -66,6 +66,7 @@ consultado em `GET /invoice-parser/{job_id}`.
 1. **Etapa 1** – utiliza um prompt fixo para extrair todas as mercadorias do
    PDF da fatura, produzindo um JSON.
 2. **Etapa 2** – converte o JSON em PDF e executa um segundo prompt fixo que
-   preenche os campos de peso com base no texto da packing list.
+   preenche os campos de peso com base no texto da packing list. Para esta
+   conversão o serviço utiliza a biblioteca `fpdf`, que deve estar instalada.
 
 Ambos os prompts estão disponíveis em `app/prompts.py`.
