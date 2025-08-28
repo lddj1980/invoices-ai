@@ -4,6 +4,7 @@ import tempfile
 import logging
 import uuid
 import time
+import json
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks
 from typing import Dict, List
 
@@ -100,6 +101,22 @@ DEFAULT_PDF_FALLBACK_PROMPT_PREFIX = (
     "Se possível, retorne em JSON com campos como descricao, quantidade, unidade, "
     "preco_unitario, moeda e total. Conteúdo:\n\n"
 )
+
+def _json_to_pdf(data: Dict) -> bytes:
+    """Convert a JSON-serializable object to PDF bytes."""
+    try:  # pragma: no cover - availability depends on runtime
+        from fpdf import FPDF
+    except Exception as exc:  # pragma: no cover - environment dependent
+        logger.error("fpdf package is not installed: %s", exc)
+        raise HTTPException(status_code=500, detail="fpdf package is not installed") from exc
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    json_str = json.dumps(data, indent=2, ensure_ascii=False)
+    for line in json_str.splitlines():
+        pdf.multi_cell(0, 10, line)
+    return pdf.output(dest="S").encode("latin-1")
 
 def _extract_text(content: bytes, filename: str) -> str:
     """Extract text from ``content`` using PDF parsing or OCR.
@@ -269,6 +286,56 @@ async def invoices_gpt(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return {"file_id": file_id, "result": result_text}
+
+
+@app.post("/invoice-json-gpt-pdf")
+async def invoice_json_gpt_pdf(
+    background_tasks: BackgroundTasks,
+    packing_list: UploadFile = File(...),
+    invoice: str = Form(...),
+    prompt: str | None = Form(None),
+):
+    """Recebe um JSON de invoice e um PDF de packing list.
+
+    O JSON é convertido para PDF e então processado junto com o PDF enviado,
+    reutilizando :func:`_process_invoices_gpt_pdf`.
+    """
+    logger.info(
+        "/invoice-json-gpt-pdf called with packing_list '%s'", packing_list.filename
+    )
+
+    if not packing_list.filename.lower().endswith(".pdf"):
+        logger.error("File is not a PDF: %s", packing_list.filename)
+        raise HTTPException(status_code=400, detail="Envie um arquivo PDF.")
+
+    try:
+        invoice_data = json.loads(invoice)
+    except Exception:
+        logger.error("Invalid JSON provided for invoice")
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    try:
+        invoice_contents = _json_to_pdf(invoice_data)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to generate PDF from JSON: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to generate invoice PDF") from exc
+
+    packing_contents = await packing_list.read()
+    logger.debug(
+        "Read %d bytes for packing_list and generated %d bytes for invoice PDF",
+        len(packing_contents),
+        len(invoice_contents),
+    )
+
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {"status": "pending", "result": None, "created_at": time.time()}
+    _cleanup_jobs()
+    background_tasks.add_task(
+        _process_invoices_gpt_pdf, job_id, packing_contents, invoice_contents, prompt
+    )
+    return {"job_id": job_id}
 
 
 @app.post("/invoices-gpt-pdf")

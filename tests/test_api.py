@@ -1,6 +1,10 @@
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+import json
+import io
+
+from PyPDF2 import PdfReader
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,7 +12,7 @@ from fastapi.testclient import TestClient
 # Ensure project root on path
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from app.main import app, vector_store, DEFAULT_PDF_PROMPT
+from app.main import app, vector_store, DEFAULT_PDF_PROMPT, jobs
 
 
 PDF_WITH_TEXT = b"""%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n4 0 obj<</Length 55>>stream\nBT\n/F1 24 Tf\n50 150 Td\n(FOB sale condition: FOB) Tj\nET\nendstream\nendobj\n5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\nxref\n0 6\n0000000000 65535 f \n0000000010 00000 n \n0000000079 00000 n \n0000000178 00000 n \n0000000401 00000 n \n0000000514 00000 n \ntrailer<</Size 6/Root 1 0 R>>\nstartxref\n611\n%%EOF"""
@@ -210,6 +214,46 @@ def test_invoices_gpt_pdf_accepts_custom_prompt(monkeypatch):
     assert body["result"]["file_ids"] == {"packing_list": "fid1", "invoice": "fid2"}
     assert body["result"]["result"] == "ok"
     assert dummy_client.deleted == ["fid1", "fid2"]
+
+
+def test_invoice_json_gpt_pdf_converts_json(monkeypatch):
+    client = TestClient(app)
+    captured: dict[str, bytes] = {}
+
+    def fake_process(job_id, packing_contents, invoice_contents, prompt):
+        captured["invoice"] = invoice_contents
+        jobs[job_id]["status"] = "done"
+        jobs[job_id]["result"] = "ok"
+
+    monkeypatch.setattr("app.main._process_invoices_gpt_pdf", fake_process)
+
+    invoice_data = {"item": "ABC", "qty": 1}
+    response = client.post(
+        "/invoice-json-gpt-pdf",
+        data={"invoice": json.dumps(invoice_data)},
+        files={"packing_list": ("packing.pdf", PDF_WITH_TEXT, "application/pdf")},
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+
+    text = "".join(
+        page.extract_text() or "" for page in PdfReader(io.BytesIO(captured["invoice"])).pages
+    )
+    assert "\"item\": \"ABC\"" in text
+
+    body = client.get(f"/invoices-gpt-pdf/{job_id}").json()
+    assert body["status"] == "done"
+    assert body["result"] == "ok"
+
+
+def test_invoice_json_gpt_pdf_invalid_json():
+    client = TestClient(app)
+    response = client.post(
+        "/invoice-json-gpt-pdf",
+        data={"invoice": "not-json"},
+        files={"packing_list": ("packing.pdf", PDF_WITH_TEXT, "application/pdf")},
+    )
+    assert response.status_code == 400
 
 
 def test_invoices_gpt_pdf_uses_default_prompt(monkeypatch):
