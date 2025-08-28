@@ -56,3 +56,16 @@ Exemplo de retorno:
 ```
 
 Os prompts utilizados são definidos em `app/agents.py` nas constantes `PRODUCT_HEADERS_PROMPT` e `PRODUCT_ITEMS_PROMPT`.
+
+## Invoice Parser
+
+O endpoint `POST /invoice-parser` executa um fluxo em duas etapas para
+processar uma fatura e sua packing list. Ele retorna um `job_id` que pode ser
+consultado em `GET /invoice-parser/{job_id}`.
+
+1. **Etapa 1** – utiliza um prompt fixo para extrair todas as mercadorias do
+   PDF da fatura, produzindo um JSON.
+2. **Etapa 2** – converte o JSON em PDF e executa um segundo prompt fixo que
+   preenche os campos de peso com base no texto da packing list.
+
+Ambos os prompts estão disponíveis em `app/prompts.py`.

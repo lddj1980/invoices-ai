@@ -8,6 +8,11 @@ import json
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks
 from typing import Dict, List
 
+from .prompts import (
+    INVOICE_PARSER_STEP1_PROMPT,
+    INVOICE_PARSER_STEP2_PROMPT,
+)
+
 from .agents import (
     identify_fields,
     select_relevant_chunks,
@@ -475,6 +480,92 @@ def _process_invoices_gpt_pdf(
 
     jobs[job_id]["result"] = {"file_ids": uploaded_ids or None, "result": result_text}
     jobs[job_id]["status"] = "done"
+
+
+def _process_invoice_parser(
+    job_id: str, packing_contents: bytes, invoice_contents: bytes
+) -> None:
+    """Orchestrate two-step invoice parsing using fixed prompts.
+
+    Step 1 uses :data:`INVOICE_PARSER_STEP1_PROMPT` to extract a JSON array
+    of goods from the provided invoice and packing list PDFs. The resulting
+    JSON is converted to PDF and fed into Step 2 with
+    :data:`INVOICE_PARSER_STEP2_PROMPT` to complete the weight fields.
+    """
+
+    stage1_job = f"{job_id}_stage1"
+    jobs[stage1_job] = {"status": "pending", "result": None, "created_at": time.time()}
+    _process_invoices_gpt_pdf(
+        stage1_job, packing_contents, invoice_contents, INVOICE_PARSER_STEP1_PROMPT
+    )
+    stage1 = jobs.pop(stage1_job, None)
+    if not stage1 or stage1.get("status") != "done":
+        jobs[job_id]["status"] = "error"
+        jobs[job_id]["result"] = stage1.get("result") if stage1 else None
+        return
+
+    result_text = stage1.get("result")
+    if isinstance(result_text, dict):
+        result_text = result_text.get("result", "")
+    try:
+        invoice_json = json.loads(result_text)
+    except Exception:
+        jobs[job_id]["status"] = "error"
+        jobs[job_id]["result"] = "Invalid JSON from stage 1"
+        return
+
+    try:
+        invoice_pdf = _json_to_pdf(invoice_json)
+    except HTTPException as exc:
+        jobs[job_id]["status"] = "error"
+        jobs[job_id]["result"] = exc.detail
+        return
+    except Exception as exc:  # pragma: no cover
+        jobs[job_id]["status"] = "error"
+        jobs[job_id]["result"] = str(exc)
+        return
+
+    _process_invoices_gpt_pdf(
+        job_id, packing_contents, invoice_pdf, INVOICE_PARSER_STEP2_PROMPT
+    )
+
+
+@app.post("/invoice-parser")
+async def invoice_parser(
+    background_tasks: BackgroundTasks,
+    packing_list: UploadFile = File(...),
+    invoice: UploadFile = File(...),
+):
+    """Execute the two-step invoice parsing pipeline.
+
+    Both ``packing_list`` and ``invoice`` must be PDFs. The endpoint schedules
+    a background task and returns a ``job_id`` for status polling.
+    """
+
+    for f in (packing_list, invoice):
+        if not f.filename.lower().endswith(".pdf"):
+            raise HTTPException(status_code=400, detail="Envie dois arquivos PDF.")
+
+    packing_contents = await packing_list.read()
+    invoice_contents = await invoice.read()
+
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {"status": "pending", "result": None, "created_at": time.time()}
+    _cleanup_jobs()
+    background_tasks.add_task(
+        _process_invoice_parser, job_id, packing_contents, invoice_contents
+    )
+    return {"job_id": job_id}
+
+
+@app.get("/invoice-parser/{job_id}")
+async def get_invoice_parser(job_id: str):
+    """Return status/result for the ``invoice-parser`` pipeline."""
+    _cleanup_jobs()
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"status": job["status"], "result": job["result"]}
 
 
 @app.get("/invoices-gpt-pdf/{job_id}")
