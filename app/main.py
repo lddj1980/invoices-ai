@@ -420,14 +420,14 @@ def _process_invoices_gpt_pdf(
         response = client.responses.create(
             model="gpt-5",
             input=[
+                {"role": "system", "content": prompt},
                 {
                     "role": "user",
                     "content": [
-                        {"type": "input_text", "text": prompt},
-                        {"type": "input_file", "file_id": uploaded_ids["packing_list"]},
                         {"type": "input_file", "file_id": uploaded_ids["invoice"]},
+                        {"type": "input_file", "file_id": uploaded_ids["packing_list"]},
                     ],
-                }
+                },
             ],
         )
 
@@ -448,20 +448,19 @@ def _process_invoices_gpt_pdf(
                 "Local text extraction succeeded with %d chars; sending as input_text fallback",
                 len(combined),
             )
-            fallback_prompt = (
-                f"{prompt}\n\nConteúdo:\n\n{combined}"
-                if custom_prompt
-                else DEFAULT_PDF_FALLBACK_PROMPT_PREFIX + combined
-            )
             response = client.responses.create(
                 model="gpt-5",
                 input=[
                     {
+                        "role": "system",
+                        "content": prompt if custom_prompt else DEFAULT_PDF_PROMPT,
+                    },
+                    {
                         "role": "user",
                         "content": [
-                            {"type": "input_text", "text": fallback_prompt}
+                            {"type": "input_text", "text": combined}
                         ],
-                    }
+                    },
                 ],
             )
             result_text = getattr(response, "output_text", None) or str(response)

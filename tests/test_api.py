@@ -186,10 +186,12 @@ def test_invoices_gpt_pdf_accepts_custom_prompt(monkeypatch):
                 self.deleted.append(fid)
 
             def create_response(model, input):
-                content = input[0]["content"]
-                assert content[0]["text"] == "custom"
+                assert input[0]["role"] == "system"
+                assert input[0]["content"] == "custom"
+                assert input[1]["role"] == "user"
+                content = input[1]["content"]
+                assert content[0] == {"type": "input_file", "file_id": "fid2"}
                 assert content[1] == {"type": "input_file", "file_id": "fid1"}
-                assert content[2] == {"type": "input_file", "file_id": "fid2"}
                 return SimpleNamespace(output_text="ok")
 
             self.files = SimpleNamespace(create=create_file, delete=delete_file)
@@ -278,10 +280,12 @@ def test_invoices_gpt_pdf_uses_default_prompt(monkeypatch):
                 self.deleted.append(fid)
 
             def create_response(model, input):
-                content = input[0]["content"]
-                assert content[0]["text"] == DEFAULT_PDF_PROMPT
-                assert content[1]["file_id"] == "fid1"
-                assert content[2]["file_id"] == "fid2"
+                assert input[0]["role"] == "system"
+                assert input[0]["content"] == DEFAULT_PDF_PROMPT
+                assert input[1]["role"] == "user"
+                content = input[1]["content"]
+                assert content[0] == {"type": "input_file", "file_id": "fid2"}
+                assert content[1] == {"type": "input_file", "file_id": "fid1"}
                 return SimpleNamespace(output_text="ok")
 
             self.files = SimpleNamespace(create=create_file, delete=delete_file)
