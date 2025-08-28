@@ -13,6 +13,10 @@ from fastapi.testclient import TestClient
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from app.main import app, vector_store, DEFAULT_PDF_PROMPT, jobs
+from app.prompts import (
+    INVOICE_PARSER_STEP1_PROMPT,
+    INVOICE_PARSER_STEP2_PROMPT,
+)
 
 
 PDF_WITH_TEXT = b"""%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n4 0 obj<</Length 55>>stream\nBT\n/F1 24 Tf\n50 150 Td\n(FOB sale condition: FOB) Tj\nET\nendstream\nendobj\n5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\nxref\n0 6\n0000000000 65535 f \n0000000010 00000 n \n0000000079 00000 n \n0000000178 00000 n \n0000000401 00000 n \n0000000514 00000 n \ntrailer<</Size 6/Root 1 0 R>>\nstartxref\n611\n%%EOF"""
@@ -182,10 +186,12 @@ def test_invoices_gpt_pdf_accepts_custom_prompt(monkeypatch):
                 self.deleted.append(fid)
 
             def create_response(model, input):
-                content = input[0]["content"]
-                assert content[0]["text"] == "custom"
+                assert input[0]["role"] == "system"
+                assert input[0]["content"] == "custom"
+                assert input[1]["role"] == "user"
+                content = input[1]["content"]
+                assert content[0] == {"type": "input_file", "file_id": "fid2"}
                 assert content[1] == {"type": "input_file", "file_id": "fid1"}
-                assert content[2] == {"type": "input_file", "file_id": "fid2"}
                 return SimpleNamespace(output_text="ok")
 
             self.files = SimpleNamespace(create=create_file, delete=delete_file)
@@ -274,10 +280,12 @@ def test_invoices_gpt_pdf_uses_default_prompt(monkeypatch):
                 self.deleted.append(fid)
 
             def create_response(model, input):
-                content = input[0]["content"]
-                assert content[0]["text"] == DEFAULT_PDF_PROMPT
-                assert content[1]["file_id"] == "fid1"
-                assert content[2]["file_id"] == "fid2"
+                assert input[0]["role"] == "system"
+                assert input[0]["content"] == DEFAULT_PDF_PROMPT
+                assert input[1]["role"] == "user"
+                content = input[1]["content"]
+                assert content[0] == {"type": "input_file", "file_id": "fid2"}
+                assert content[1] == {"type": "input_file", "file_id": "fid1"}
                 return SimpleNamespace(output_text="ok")
 
             self.files = SimpleNamespace(create=create_file, delete=delete_file)
@@ -305,3 +313,42 @@ def test_invoices_gpt_pdf_uses_default_prompt(monkeypatch):
     assert body["result"]["file_ids"] == {"packing_list": "fid1", "invoice": "fid2"}
     assert body["result"]["result"] == "ok"
     assert dummy_client.deleted == ["fid1", "fid2"]
+
+
+def test_invoice_parser_pipeline(monkeypatch):
+    client = TestClient(app)
+
+    calls = []
+
+    def fake_process(job_id, packing_contents, invoice_contents, prompt):
+        calls.append((job_id, prompt, invoice_contents))
+        if prompt == INVOICE_PARSER_STEP1_PROMPT:
+            jobs[job_id]["status"] = "done"
+            jobs[job_id]["result"] = {"result": '[{"description":"A","qty_commercial":1}]'}
+        elif prompt == INVOICE_PARSER_STEP2_PROMPT:
+            assert invoice_contents == b"PDF_FROM_JSON"
+            jobs[job_id]["status"] = "done"
+            jobs[job_id]["result"] = "final"
+
+    monkeypatch.setattr("app.main._process_invoices_gpt_pdf", fake_process)
+
+    def fake_json_to_pdf(data):
+        assert data == [{"description": "A", "qty_commercial": 1}]
+        return b"PDF_FROM_JSON"
+
+    monkeypatch.setattr("app.main._json_to_pdf", fake_json_to_pdf)
+
+    response = client.post(
+        "/invoice-parser",
+        files={
+            "packing_list": ("packing.pdf", PDF_WITH_TEXT, "application/pdf"),
+            "invoice": ("invoice.pdf", PDF_WITH_TEXT, "application/pdf"),
+        },
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+    body = client.get(f"/invoice-parser/{job_id}").json()
+    assert body["status"] == "done"
+    assert body["result"] == "final"
+    assert calls[0][1] == INVOICE_PARSER_STEP1_PROMPT
+    assert calls[1][1] == INVOICE_PARSER_STEP2_PROMPT
