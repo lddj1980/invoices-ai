@@ -38,6 +38,7 @@ INVOICE_PARSER_STEP1_PROMPT = """You are an advanced information extraction syst
 - Accept input as code, abbreviation, or name (case/accent insensitive). Normalize to the official code.
 - Example: "USD", "$" → {"code":220}.
 ### CONSISTENCY RULES
+- If "EXPORTADOR É O FABRICANTE?"=true, set "FABRICANTE É CONHECIDO?"=false and "NOME DO FABRICANTE" and "PAIS DO FABRICANTE" to "N/D". Only fill these fields when the exporter differs from the manufacturer.
 - Validate: "VALOR TOTAL NA CONDICAO VENDA" ≈ "VALOR UNIT. NA CONDICAO VENDA" × "QTDE UNID. COMERCIALIZADA" (±1%). Keep source values.
 - Convert all weights to kilograms (kg). If original is in lb/ton, convert to kg.
 - Reconcile product weights using PACKING LIST: match invoice items with packing list entries (by "DESCRIPTION", dimension, or code). If packing list gives consolidated net weights, distribute proportionally to invoice quantities. Always fill "PESO LIQUIDO UNIT. (KG)" and "PESO LIQUIDO TOTAL (KG)" in kg. Validate that sum of "PESO LIQUIDO TOTAL (KG)" ≈ packing list total (±1%). If matching not possible, set "N/D" for weights.
