@@ -21,11 +21,17 @@ from app.agents import (
     identify_products,
 )
 from app.main import FIELD_RULES
+from app.prompts import INVOICE_PARSER_STEP1_PROMPT
 
 
 def test_prompt_lists_all_conditions():
     for condition in SALE_CONDITIONS:
         assert condition in SALES_CONDITION_PROMPT
+
+
+def test_invoice_prompt_enforces_exporter_manufacturer_rule():
+    assert 'EXPORTADOR É O FABRICANTE?"=true' in INVOICE_PARSER_STEP1_PROMPT
+    assert '"FABRICANTE É CONHECIDO?"=false' in INVOICE_PARSER_STEP1_PROMPT
 
 
 def test_normalize_sales_condition_fob():
