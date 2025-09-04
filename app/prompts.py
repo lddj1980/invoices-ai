@@ -1,4 +1,9 @@
-INVOICE_PARSER_STEP1_PROMPT = """You are an advanced information extraction system for import/export invoices. Your task: extract all goods (MERCADORIA) and output them as a JSON array of objects. Each object represents one invoice line and MUST follow the schema strictly.
+from pathlib import Path
+
+LOOKUP_TABLES = Path(__file__).with_name("lookup_tables.json").read_text(encoding="utf-8")
+
+INVOICE_PARSER_STEP1_PROMPT = (
+    """You are an advanced information extraction system for import/export invoices. Your task: extract all goods (MERCADORIA) and output them as a JSON array of objects. Each object represents one invoice line and MUST follow the schema strictly.
 ### CORE EXTRACTION RULES
 - Output ONLY a valid JSON array. UTF-8. No comments or explanations.
 - Use exactly the field names below (case, spaces, accents, punctuation).
@@ -12,43 +17,45 @@ INVOICE_PARSER_STEP1_PROMPT = """You are an advanced information extraction syst
 - "EXPORTADOR É O FABRICANTE?" (boolean)
 - "FABRICANTE É CONHECIDO?" (boolean)
 - "NOME DO FABRICANTE" (string | "N/D")
-- "PAIS DO FABRICANTE" (object with code | "N/D") → TAB-PAISES
+- "PAIS DO FABRICANTE" (object | "N/D") → TAB-PAISES. Shape: {"code": <string>}
 - "APLICACAO" (string | "N/D")
-- "CONDICAO DE VENDA (INCOTERM)" (object with code) → TAB-COND.VENDA
+- "CONDICAO DE VENDA (INCOTERM)" (object) → TAB-COND.VENDA. Shape: {"code": <string>}
 - "COMPLEMENTO" (string | "N/D")
-- "UNIDADE COMERCIALIZADA" (object with code) → TAB-UNIDADES
+- "UNIDADE COMERCIALIZADA" (object) → TAB-UNIDADES. Shape: {"code": <string>}
 - "QTDE UNID. COMERCIALIZADA" (number)
 - "QTDE UNID. ESTATISTICA" (number | "N/D")
-- "MOEDA NEGOCIADA" (object with code) → TAB-MOEDAS
+- "MOEDA NEGOCIADA" (object) → TAB-MOEDAS. Shape: {"code": <string>}
 - "VALOR UNIT. NA CONDICAO VENDA" (number)
 - "VALOR TOTAL NA CONDICAO VENDA" (number)
 - "PESO LIQUIDO UNIT. (KG)" (number | "N/D") → always kilograms
 - "PESO LIQUIDO TOTAL (KG)" (number | "N/D") → always kilograms
-- "DESCRICAO COMPLEMENTAR" (string | "N/D")
-- "COBERTURA CAMBIAL" (boolean)
-- "MOT. SEM COBERTURA" (object with code | "N/D") → TAB-MOT.SEM.COBERTURA; mandatory if "COBERTURA CAMBIAL"=false
-- "INST. FINANCIADORA" (object with code | "N/D") → TAB-INST.FINANCIADORA
+ - "DESCRICAO COMPLEMENTAR" (string | "N/D")
+ - "COBERTURA CAMBIAL" (string) → default "0000_A_0180DIAS" unless the PACKING LIST clearly indicates a payment term shorter than 180 days; in that case use the corresponding coverage code (e.g., "0000_A_0090DIAS" for payment in 90 days)
+ - "MOT. SEM COBERTURA" (object | "N/D") → TAB-MOT.SEM.COBERTURA. Shape: {"code": <string>}; mandatory if "COBERTURA CAMBIAL" indicates no coverage
+ - "INST. FINANCIADORA" (object | "N/D") → TAB-INST.FINANCIADORA. Shape: {"code": <string>}
 - "VALOR" (number | "N/D")
 - "Nº ROF/BACEN" (string | "N/D")
 - "FATURA/INVOICE" (string | "N/D")
 - "CFOP" (string | "N/D")
-- "FUNDAMENTO LEGAL" (object with code | "N/D") → TAB-FUNDAMENTOS_LEGAIS
+- "FUNDAMENTO LEGAL" (object | "N/D") → TAB-FUNDAMENTOS_LEGAIS. Shape: {"code": <string>}
 ### LOOKUP BEHAVIOR
-- Always return only the official code exactly as in tables.
-- Accept input as code, abbreviation, or name (case/accent insensitive). Normalize to the official code.
-- Example: "USD", "$" → {"code":220}.
+- For every lookup field above, output only the lookup "code" (string) validated against the tables.
+- Accept invoice input as code, abbreviation, or name (case/accent insensitive). Normalize to the official code from the tables.
+- Example: "USD", "$" → {"code":"220"}.
 ### CONSISTENCY RULES
 - If "EXPORTADOR É O FABRICANTE?"=true, set "FABRICANTE É CONHECIDO?"=false and "NOME DO FABRICANTE" and "PAIS DO FABRICANTE" to "N/D". Only fill these fields when the exporter differs from the manufacturer.
 - Validate: "VALOR TOTAL NA CONDICAO VENDA" ≈ "VALOR UNIT. NA CONDICAO VENDA" × "QTDE UNID. COMERCIALIZADA" (±1%). Keep source values.
 - Convert all weights to kilograms (kg). If original is in lb/ton, convert to kg.
 - Reconcile product weights using PACKING LIST: match invoice items with packing list entries (by "DESCRIPTION", dimension, or code). If packing list gives consolidated net weights, distribute proportionally to invoice quantities. Always fill "PESO LIQUIDO UNIT. (KG)" and "PESO LIQUIDO TOTAL (KG)" in kg. Validate that sum of "PESO LIQUIDO TOTAL (KG)" ≈ packing list total (±1%). If matching not possible, set "N/D" for weights.
-- "COBERTURA CAMBIAL"=false ⇒ "MOT. SEM COBERTURA" is mandatory with valid lookup code.
-- "FUNDAMENTO LEGAL": detect any law/decree/regulation reference and map to TAB-FUNDAMENTOS_LEGAIS.
+ - Default "COBERTURA CAMBIAL" to "0000_A_0180DIAS" unless the PACKING LIST specifies a payment term shorter than 180 days; then select the matching coverage code.
+ - If "COBERTURA CAMBIAL" denotes no coverage, "MOT. SEM COBERTURA" is mandatory with valid lookup code.
+ - "FUNDAMENTO LEGAL": detect any law/decree/regulation reference and map to TAB-FUNDAMENTOS_LEGAIS.
 ### OUTPUT FORMAT
 - One valid JSON array. One object per product (from INVOICE). Do not output pallets or consolidated rows. Use PACKING LIST only for weights. No trailing commas. No comments.
 ### Embedded lookup tables (authoritative; use exactly as provided):
-[LOOKUP TABLES TRUNCATED]
 """
+    + LOOKUP_TABLES
+)
 
 INVOICE_PARSER_STEP2_PROMPT = """You are a post-processor for import/export data. Read two inputs from the provided sources:
 1) INVOICE_GOODS_JSON: the JSON array of goods extracted in Stage 1 (do not re-extract; use it as the base and keep the same order).
