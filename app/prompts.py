@@ -30,7 +30,7 @@ INVOICE_PARSER_STEP1_PROMPT = (
 - "PESO LIQUIDO UNIT. (KG)" (number | "N/D") → always kilograms
 - "PESO LIQUIDO TOTAL (KG)" (number | "N/D") → always kilograms
  - "DESCRICAO COMPLEMENTAR" (string | "N/D")
- - "COBERTURA CAMBIAL" (string) → default "0000_A_0180DIAS" unless PACKING LIST explicitly states a different coverage code
+ - "COBERTURA CAMBIAL" (string) → default "0000_A_0180DIAS" unless the PACKING LIST clearly indicates a payment term shorter than 180 days; in that case use the corresponding coverage code (e.g., "0000_A_0090DIAS" for payment in 90 days)
  - "MOT. SEM COBERTURA" (object | "N/D") → TAB-MOT.SEM.COBERTURA. Shape: {"code": <string>}; mandatory if "COBERTURA CAMBIAL" indicates no coverage
  - "INST. FINANCIADORA" (object | "N/D") → TAB-INST.FINANCIADORA. Shape: {"code": <string>}
 - "VALOR" (number | "N/D")
@@ -47,7 +47,7 @@ INVOICE_PARSER_STEP1_PROMPT = (
 - Validate: "VALOR TOTAL NA CONDICAO VENDA" ≈ "VALOR UNIT. NA CONDICAO VENDA" × "QTDE UNID. COMERCIALIZADA" (±1%). Keep source values.
 - Convert all weights to kilograms (kg). If original is in lb/ton, convert to kg.
 - Reconcile product weights using PACKING LIST: match invoice items with packing list entries (by "DESCRIPTION", dimension, or code). If packing list gives consolidated net weights, distribute proportionally to invoice quantities. Always fill "PESO LIQUIDO UNIT. (KG)" and "PESO LIQUIDO TOTAL (KG)" in kg. Validate that sum of "PESO LIQUIDO TOTAL (KG)" ≈ packing list total (±1%). If matching not possible, set "N/D" for weights.
- - Default "COBERTURA CAMBIAL" to "0000_A_0180DIAS" unless PACKING LIST explicitly provides another coverage code.
+ - Default "COBERTURA CAMBIAL" to "0000_A_0180DIAS" unless the PACKING LIST specifies a payment term shorter than 180 days; then select the matching coverage code.
  - If "COBERTURA CAMBIAL" denotes no coverage, "MOT. SEM COBERTURA" is mandatory with valid lookup code.
  - "FUNDAMENTO LEGAL": detect any law/decree/regulation reference and map to TAB-FUNDAMENTOS_LEGAIS.
 ### OUTPUT FORMAT
