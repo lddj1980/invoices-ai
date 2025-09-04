@@ -1,0 +1,42 @@
+{
+  "countries": [
+    {"code": 13, "name": "AFEGANISTAO"},
+    {"code": 17, "name": "ALBANIA, REPUBLICA DA"},
+    {"code": 23, "name": "ALEMANHA"},
+    {"code": 63, "name": "Argentina"},
+    {"code": 105, "name": "Brasil"}
+  ],
+  "currencies": [
+    {"code": 5, "name": "AFEGANE"},
+    {"code": 20, "name": "BALBOA"},
+    {"code": 150, "name": "DOLAR AUSTRALIANO"},
+    {"code": 220, "name": "DOLAR DOS EUA"},
+    {"code": 978, "name": "EURO"}
+  ],
+  "units": [
+    {"code": 10, "name": "QUILOGRAMA LIQUIDO", "alias": "nan"},
+    {"code": 11, "name": "UNIDADE", "alias": "PEÇAS"},
+    {"code": 14, "name": "METRO", "alias": "nan"}
+  ],
+  "incoterms": [
+    {"code": "CFR", "name": "CFR - COST AND FREIGHT"},
+    {"code": "CIF", "name": "CIF - COST. INSURANCE AND FREIGHT"},
+    {"code": "FOB", "name": "FOB - FREE ON BOARD"}
+  ],
+  "financing_institutions": [
+    {"code": 1, "name": "AID - AGENCY FOR INTERNATIONAL DEVELOPMENT (AGENCIA PARA O DESENVOLVIMENTO INTERNACIONAL) - ESTADOS UNIDOS"},
+    {"code": 4, "name": "BID - INTER-AMERICAN DEVELOPMENT BANK (BANCO INTERAMERICANO DE DESENVOLVIMENTO)"},
+    {"code": 32, "name": "EXIMBANK - EXPORT IMPORT BANK OF THE UNITED STATES - ESTADOS UNIDOS"}
+  ],
+  "no_fx_reasons": [
+    {"code": 30, "name": "INVESTIMENTO DE CAPITAL ESTRANGEIRO"},
+    {"code": 39, "name": "AMOSTRAS DE VALOR ATE US$1000,00"},
+    {"code": 99, "name": "OUTRAS IMPORTACOES SEM COBERTURA CAMBIAL"}
+  ],
+  "legal_basis": [
+    {"code": 1, "name": "ALÍQUOTA OMC"},
+    {"code": 3, "name": "ALÍQUOTA TEC"},
+    {"code": 920, "name": "DRAWBACK – SUSPENSÃO CONTÍNUO"}
+  ]
+}
+
