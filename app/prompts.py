@@ -1,4 +1,9 @@
-INVOICE_PARSER_STEP1_PROMPT = """You are an advanced information extraction system for import/export invoices. Your task: extract all goods (MERCADORIA) and output them as a JSON array of objects. Each object represents one invoice line and MUST follow the schema strictly.
+from pathlib import Path
+
+LOOKUP_TABLES = Path(__file__).with_name("lookup_tables.json").read_text(encoding="utf-8")
+
+INVOICE_PARSER_STEP1_PROMPT = (
+    """You are an advanced information extraction system for import/export invoices. Your task: extract all goods (MERCADORIA) and output them as a JSON array of objects. Each object represents one invoice line and MUST follow the schema strictly.
 ### CORE EXTRACTION RULES
 - Output ONLY a valid JSON array. UTF-8. No comments or explanations.
 - Use exactly the field names below (case, spaces, accents, punctuation).
@@ -12,31 +17,31 @@ INVOICE_PARSER_STEP1_PROMPT = """You are an advanced information extraction syst
 - "EXPORTADOR É O FABRICANTE?" (boolean)
 - "FABRICANTE É CONHECIDO?" (boolean)
 - "NOME DO FABRICANTE" (string | "N/D")
-- "PAIS DO FABRICANTE" (object with code | "N/D") → TAB-PAISES
+- "PAIS DO FABRICANTE" (object | "N/D") → TAB-PAISES. Shape: {"code": <number|string>, "name": <string>}
 - "APLICACAO" (string | "N/D")
-- "CONDICAO DE VENDA (INCOTERM)" (object with code) → TAB-COND.VENDA
+- "CONDICAO DE VENDA (INCOTERM)" (object) → TAB-COND.VENDA. Shape: {"code": <string>, "name": <string>}
 - "COMPLEMENTO" (string | "N/D")
-- "UNIDADE COMERCIALIZADA" (object with code) → TAB-UNIDADES
+- "UNIDADE COMERCIALIZADA" (object) → TAB-UNIDADES. Shape: {"code": <number|string>, "name": <string>, "alias": <string|"N/D">}
 - "QTDE UNID. COMERCIALIZADA" (number)
 - "QTDE UNID. ESTATISTICA" (number | "N/D")
-- "MOEDA NEGOCIADA" (object with code) → TAB-MOEDAS
+- "MOEDA NEGOCIADA" (object) → TAB-MOEDAS. Shape: {"code": <number|string>, "name": <string>}
 - "VALOR UNIT. NA CONDICAO VENDA" (number)
 - "VALOR TOTAL NA CONDICAO VENDA" (number)
 - "PESO LIQUIDO UNIT. (KG)" (number | "N/D") → always kilograms
 - "PESO LIQUIDO TOTAL (KG)" (number | "N/D") → always kilograms
 - "DESCRICAO COMPLEMENTAR" (string | "N/D")
 - "COBERTURA CAMBIAL" (boolean)
-- "MOT. SEM COBERTURA" (object with code | "N/D") → TAB-MOT.SEM.COBERTURA; mandatory if "COBERTURA CAMBIAL"=false
-- "INST. FINANCIADORA" (object with code | "N/D") → TAB-INST.FINANCIADORA
+- "MOT. SEM COBERTURA" (object | "N/D") → TAB-MOT.SEM.COBERTURA. Shape: {"code": <number|string>, "name": <string>}; mandatory if "COBERTURA CAMBIAL"=false
+- "INST. FINANCIADORA" (object | "N/D") → TAB-INST.FINANCIADORA. Shape: {"code": <number|string>, "name": <string>}
 - "VALOR" (number | "N/D")
 - "Nº ROF/BACEN" (string | "N/D")
 - "FATURA/INVOICE" (string | "N/D")
 - "CFOP" (string | "N/D")
-- "FUNDAMENTO LEGAL" (object with code | "N/D") → TAB-FUNDAMENTOS_LEGAIS
+- "FUNDAMENTO LEGAL" (object | "N/D") → TAB-FUNDAMENTOS_LEGAIS. Shape: {"code": <number|string>, "name": <string>}
 ### LOOKUP BEHAVIOR
-- Always return only the official code exactly as in tables.
-- Accept input as code, abbreviation, or name (case/accent insensitive). Normalize to the official code.
-- Example: "USD", "$" → {"code":220}.
+- For every lookup field above, return both "code" and official "name" exactly as in the tables.
+- Accept invoice input as code, abbreviation, or name (case/accent insensitive). Normalize to the official entry from the tables.
+- Example: "USD", "$" → {"code":220,"name":"DÓLAR DOS EUA"}.
 ### CONSISTENCY RULES
 - If "EXPORTADOR É O FABRICANTE?"=true, set "FABRICANTE É CONHECIDO?"=false and "NOME DO FABRICANTE" and "PAIS DO FABRICANTE" to "N/D". Only fill these fields when the exporter differs from the manufacturer.
 - Validate: "VALOR TOTAL NA CONDICAO VENDA" ≈ "VALOR UNIT. NA CONDICAO VENDA" × "QTDE UNID. COMERCIALIZADA" (±1%). Keep source values.
@@ -47,8 +52,9 @@ INVOICE_PARSER_STEP1_PROMPT = """You are an advanced information extraction syst
 ### OUTPUT FORMAT
 - One valid JSON array. One object per product (from INVOICE). Do not output pallets or consolidated rows. Use PACKING LIST only for weights. No trailing commas. No comments.
 ### Embedded lookup tables (authoritative; use exactly as provided):
-[LOOKUP TABLES TRUNCATED]
 """
+    + LOOKUP_TABLES
+)
 
 INVOICE_PARSER_STEP2_PROMPT = """You are a post-processor for import/export data. Read two inputs from the provided sources:
 1) INVOICE_GOODS_JSON: the JSON array of goods extracted in Stage 1 (do not re-extract; use it as the base and keep the same order).
