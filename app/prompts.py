@@ -82,8 +82,8 @@ WEIGHT COMPLETION RULES
 4) If PACKING_LIST provides only CONSOLIDATED NET weight for a group covering multiple items:
    - Distribute proportionally within that group using item share of quantity; if credible per-unit mass cues exist in specs, prefer those.
    - For each item i in the group:
-       "PESO LIQUIDO TOTAL (KG)"(i) = group_net_weight × qty_i / Σqty_group
-       "PESO LIQUIDO UNIT. (KG)"(i)  = "PESO LIQUIDO TOTAL (KG)"(i) / qty_i
+       "PESO LIQUIDO UNIT. (KG)"(i)  = group_net_weight / Σqty_group
+       "PESO LIQUIDO TOTAL (KG)"(i) = "PESO LIQUIDO UNIT. (KG)"(i) × qty_i
 5) Validation and reconciliation:
    - Non-negative numbers; "." as decimal separator; no thousand separators.
    - Round weights to 5 decimals.
