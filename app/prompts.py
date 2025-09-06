@@ -57,7 +57,9 @@ INVOICE_PARSER_STEP1_PROMPT = (
     + LOOKUP_TABLES
 )
 
-INVOICE_PARSER_STEP2_PROMPT = """You are a post-processor for import/export data. Read two inputs from the provided sources:
+
+INVOICE_PARSER_STEP2_PROMPT = """
+You are a post-processor for import/export data. Read two inputs from the provided sources:
 1) INVOICE_GOODS_JSON: the JSON array of goods extracted in Stage 1 (do not re-extract; use it as the base and keep the same order).
 2) PACKING_LIST_TEXT: the packing list content (text or table).
 
@@ -76,20 +78,37 @@ STRICT OUTPUT
 WEIGHT COMPLETION RULES
 1) Units: always kilograms (kg). Convert from lb/ton if needed.
 2) Matching: map invoice items to packing-list lines via exact cues first (model/diameter/dimensions/WLL/specs), then fuzzy match and quantity proximity. Break ties by the closest quantity.
-3) If PACKING_LIST provides per-item/box NET weights:
+3) Product-Scoped Grouping (critical):
+   - The packing list is structured by pallets, and inside each pallet by product families (e.g., "MASTER LINK A342", "G80 LIFTING SCREW POINT").
+   - A block of NET/GROSS weight belongs exclusively to the product family under its header. 
+   - Rule PL-1: A product family header is a line with the family name (often uppercase) followed or preceded by N.W./G.W. values.
+   - Rule PL-2: The scope of those N.W./G.W. values ends at the next family header or the end of the pallet.
+   - Rule PL-3: Variants (different sizes, diameters, WLLs) listed under the same family inherit that family’s NET weight block.
+   - Rule PL-4: Never propagate NET/GROSS weights across different families, even if they appear in the same pallet. 
+     Example: If pallet P4-28 shows "MASTER LINK A342" with N.W. 983.00/G.W. 1,044.00, those weights apply only to the MASTER LINK A342 items. 
+     Items like "G80 LIFTING SCREW POINT" on the same pallet must remain "N/D" unless they have their own weight block.
+
+4) If PACKING_LIST provides per-item/box NET weights:
    - "PESO LIQUIDO TOTAL (KG)" = sum of the matched item weights,
    - "PESO LIQUIDO UNIT. (KG)"  = "PESO LIQUIDO TOTAL (KG)" / "QTDE UNID. COMERCIALIZADA".
-4) If PACKING_LIST provides only CONSOLIDATED NET weight for a group covering multiple items:
-   - Distribute proportionally within that group using item share of quantity; if credible per-unit mass cues exist in specs, prefer those.
-   - For each item i in the group:
-       "PESO LIQUIDO UNIT. (KG)"(i)  = group_net_weight / Σqty_group
+5) If PACKING_LIST provides only CONSOLIDATED NET weight for a product family:
+   - Distribute proportionally among its invoice items using quantity share. 
+   - If per-unit mass cues exist in specs, prefer those over proportional distribution.
+   - For each item i in the family:
+       "PESO LIQUIDO UNIT. (KG)"(i)  = family_net_weight / Σqty_family
        "PESO LIQUIDO TOTAL (KG)"(i) = "PESO LIQUIDO UNIT. (KG)"(i) × qty_i
-5) Validation and reconciliation:
+6) Validation and reconciliation:
    - Non-negative numbers; "." as decimal separator; no thousand separators.
    - Round weights to 5 decimals.
-   - For each consolidated group used, the sum of assigned "PESO LIQUIDO TOTAL (KG)" must be within ±1% of the group’s packing-list total. If a small residual remains, distribute it to the largest-weight items of that same group with minimal changes (≤0.5% per item).
-6) If you cannot confidently match an item, leave both weight fields as "N/D".
-7) Never alter prices, quantities, currency, booleans, lookup codes, or any non-weight field.
+   - For each consolidated family used, the sum of assigned "PESO LIQUIDO TOTAL (KG)" must be within ±1% of the family’s packing-list total. 
+   - If a small residual remains, distribute it to the largest-weight items of that same family with minimal changes (≤0.5% per item).
+7) If you cannot confidently match an item, or if the item’s family has no weight block in the packing list, leave both weight fields as "N/D".
+8) Never alter prices, quantities, currency, booleans, lookup codes, or any non-weight field.
+
+FALLBACKS
+- Ambiguity or conflicting matches ⇒ "N/D".
+- Normalize decimal notation (use "."; remove thousand separators).
+- Ignore case, pluralization, or punctuation differences in product family names.
 
 INPUT PLACEHOLDERS
 - INVOICE_GOODS_JSON: {{INVOICE_GOODS_JSON_SOURCE}}
