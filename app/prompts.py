@@ -12,7 +12,8 @@ INVOICE_PARSER_STEP1_PROMPT = (
 - Normalize booleans to true/false. Default is false when absent.
 - All numeric fields (e.g., quantities, weights, prices, financing_value) must have exactly 5 decimal places (pad with zeros if needed). Lookup codes are excluded.
 ### MERCADORIA SCHEMA
-- "DESCRIPTION" (string)
+- "ITEM" (string)
+- "PARTNUMBER" (string)
 - "NOME DO EXPORTADOR" (string)
 - "EXPORTADOR É O FABRICANTE?" (boolean)
 - "FABRICANTE É CONHECIDO?" (boolean)
@@ -46,7 +47,7 @@ INVOICE_PARSER_STEP1_PROMPT = (
 - If "EXPORTADOR É O FABRICANTE?"=true, set "FABRICANTE É CONHECIDO?"=false and "NOME DO FABRICANTE" and "PAIS DO FABRICANTE" to "N/D". Only fill these fields when the exporter differs from the manufacturer.
 - Validate: "VALOR TOTAL NA CONDICAO VENDA" ≈ "VALOR UNIT. NA CONDICAO VENDA" × "QTDE UNID. COMERCIALIZADA" (±1%). Keep source values.
 - Convert all weights to kilograms (kg). If original is in lb/ton, convert to kg.
-- Reconcile product weights using PACKING LIST: match invoice items with packing list entries (by "DESCRIPTION", dimension, or code). If packing list gives consolidated net weights, distribute proportionally to invoice quantities. Always fill "PESO LIQUIDO UNIT. (KG)" and "PESO LIQUIDO TOTAL (KG)" in kg. Validate that sum of "PESO LIQUIDO TOTAL (KG)" ≈ packing list total (±1%). If matching not possible, set "N/D" for weights.
+- Reconcile product weights using PACKING LIST: match invoice items with packing list entries (by "PARTNUMBER"/"ITEM", dimension, or code). If packing list gives consolidated net weights, distribute proportionally to invoice quantities. Always fill "PESO LIQUIDO UNIT. (KG)" and "PESO LIQUIDO TOTAL (KG)" in kg. Validate that sum of "PESO LIQUIDO TOTAL (KG)" ≈ packing list total (±1%). If matching not possible, set "N/D" for weights.
  - Default "COBERTURA CAMBIAL" to "0000_A_0180DIAS" unless the PACKING LIST specifies a payment term shorter than 180 days; then select the matching coverage code.
  - If "COBERTURA CAMBIAL" denotes no coverage, "MOT. SEM COBERTURA" is mandatory with valid lookup code.
  - "FUNDAMENTO LEGAL": detect any law/decree/regulation reference and map to TAB-FUNDAMENTOS_LEGAIS.
@@ -71,13 +72,13 @@ Complete only the weight fields for each invoice line and return the FINAL JSON 
 STRICT OUTPUT
 - Output ONLY a valid UTF-8 JSON array.
 - Same length and order as INVOICE_GOODS_JSON.
-- Do NOT modify any non-weight field ("DESCRIPTION", quantities, prices, currency, incoterm, booleans, lookup codes, etc.).
+- Do NOT modify any non-weight field ("ITEM", "PARTNUMBER", quantities, prices, currency, incoterm, booleans, lookup codes, etc.).
 - Preserve the 5-decimal formatting of all numeric fields exactly as in INVOICE_GOODS_JSON.
 - No comments. No extra keys. No trailing commas.
 
 WEIGHT COMPLETION RULES
 1) Units: always kilograms (kg). Convert from lb/ton if needed.
-2) Matching: map invoice items to packing-list lines via exact cues first (model/diameter/dimensions/WLL/specs), then fuzzy match and quantity proximity. Break ties by the closest quantity.
+2) Matching: map invoice items to packing-list lines via PARTNUMBER/ITEM and exact cues first (model/diameter/dimensions/WLL/specs), then fuzzy match and quantity proximity. Break ties by the closest quantity.
 3) Product-Scoped Grouping (critical):
    - The packing list is structured by pallets, and inside each pallet by product families (e.g., "MASTER LINK A342", "G80 LIFTING SCREW POINT").
    - A block of NET/GROSS weight belongs exclusively to the product family under its header. 

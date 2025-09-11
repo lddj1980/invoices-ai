@@ -54,8 +54,8 @@ def test_upload_invoice_extracts_fields(monkeypatch):
     def fake_extract_products(document, headers, knowledge_base):
         return {
             "products": [
-                {"no": 1, "description": "ABC", "details": []},
-                {"no": 2, "description": "DEF", "details": []},
+                {"no": 1, "item": "", "partnumber": "ABC", "details": []},
+                {"no": 2, "item": "", "partnumber": "DEF", "details": []},
             ],
             "totals_detected": {},
         }
@@ -75,7 +75,8 @@ def test_upload_invoice_extracts_fields(monkeypatch):
     assert body["fields"]["sales_condition"] == "FOB"
     assert body["fields"]["exportador_fabricante"] == "não"
     assert body["fields"]["nome_do_exportador"] == "ACME LTDA"
-    assert body["fields"]["produtos"]["products"][0]["description"] == "ABC"
+    assert body["fields"]["produtos"]["products"][0]["partnumber"] == "ABC"
+    assert body["fields"]["produtos"]["products"][0]["item"] == ""
     assert vector_store.chunks  # ensure document was added
 
 
@@ -324,7 +325,7 @@ def test_invoice_parser_pipeline(monkeypatch):
         calls.append((job_id, prompt, invoice_contents))
         if prompt == INVOICE_PARSER_STEP1_PROMPT:
             jobs[job_id]["status"] = "done"
-            jobs[job_id]["result"] = {"result": '[{"description":"A","qty_commercial":1}]'}
+            jobs[job_id]["result"] = {"result": '[{"item":"","partnumber":"A","qty_commercial":1}]'}
         elif prompt == INVOICE_PARSER_STEP2_PROMPT:
             assert invoice_contents == b"PDF_FROM_JSON"
             jobs[job_id]["status"] = "done"
@@ -333,7 +334,7 @@ def test_invoice_parser_pipeline(monkeypatch):
     monkeypatch.setattr("app.main._process_invoices_gpt_pdf", fake_process)
 
     def fake_json_to_pdf(data):
-        assert data == [{"description": "A", "qty_commercial": 1}]
+        assert data == [{"item": "", "partnumber": "A", "qty_commercial": 1}]
         return b"PDF_FROM_JSON"
 
     monkeypatch.setattr("app.main._json_to_pdf", fake_json_to_pdf)
