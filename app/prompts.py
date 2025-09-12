@@ -13,7 +13,7 @@ INVOICE_PARSER_STEP1_PROMPT = (
 - All numeric fields (e.g., quantities, weights, prices, financing_value) must have exactly 5 decimal places (pad with zeros if needed). Lookup codes are excluded.
 ### MERCADORIA SCHEMA
 - "ITEM" (string)
-- "PARTNUMBER" (string)
+- "PARTNUMBER" (string) → "descrição do produto+size"
 - "NOME DO EXPORTADOR" (string)
 - "EXPORTADOR É O FABRICANTE?" (boolean)
 - "FABRICANTE É CONHECIDO?" (boolean)
