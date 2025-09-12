@@ -36,6 +36,10 @@ def test_invoice_prompt_enforces_exporter_manufacturer_rules():
 def test_invoice_prompt_defines_partnumber():
     assert '"PARTNUMBER" (string) → "descrição do produto+size"' in INVOICE_PARSER_STEP1_PROMPT
 
+
+def test_invoice_prompt_mentions_freight_conditions_in_complemento():
+    assert 'condições relacionadas ao frete' in INVOICE_PARSER_STEP1_PROMPT
+
 def test_normalize_sales_condition_fob():
     assert normalize_sales_condition("FOB") == "FOB"
 
