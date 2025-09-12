@@ -43,6 +43,10 @@ INVOICE_PARSER_STEP1_PROMPT = (
 - For every lookup field above, output only the lookup "code" (string) validated against the tables.
 - Accept invoice input as code, abbreviation, or name (case/accent insensitive). Normalize to the official code from the tables.
 - Example: "USD", "$" → {"code":"220"}.
+### IDENTIFICAÇÃO DO EXPORTADOR E DO FABRICANTE
+- O exportador é a parte que vende ou envia os produtos. Procure cabeçalhos ou rótulos como "Exporter", "Exportador", "Supplier" ou "Seller". Não confunda com o consignatário ou importador.
+- O fabricante é a parte que produziu os produtos. Procure termos como "Manufacturer", "Fabricante", "Made by" ou "Produced by".
+- Se a invoice indicar explicitamente que o exportador também é o fabricante, marque "EXPORTADOR É O FABRICANTE?" = true.
 ### CONSISTENCY RULES
 - If "EXPORTADOR É O FABRICANTE?"=true, set "FABRICANTE É CONHECIDO?"=false and "NOME DO FABRICANTE" and "PAIS DO FABRICANTE" to "N/D". Only fill these fields when the exporter differs from the manufacturer.
 - Se "EXPORTADOR É O FABRICANTE?" = false, procure explicitamente na invoice o "NOME DO FABRICANTE" e o "PAIS DO FABRICANTE". Se encontrados, preencha os campos e marque "FABRICANTE É CONHECIDO?" = true; caso contrário, use "N/D" e "FABRICANTE É CONHECIDO?" = false.
