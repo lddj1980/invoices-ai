@@ -29,9 +29,14 @@ def test_prompt_lists_all_conditions():
         assert condition in SALES_CONDITION_PROMPT
 
 
-def test_invoice_prompt_enforces_exporter_manufacturer_rule():
+def test_invoice_prompt_enforces_exporter_manufacturer_rules():
     assert 'EXPORTADOR É O FABRICANTE?"=true' in INVOICE_PARSER_STEP1_PROMPT
     assert '"FABRICANTE É CONHECIDO?"=false' in INVOICE_PARSER_STEP1_PROMPT
+    assert 'Se "EXPORTADOR É O FABRICANTE?" = false, procure explicitamente na invoice o "NOME DO FABRICANTE" e o "PAIS DO FABRICANTE"' in INVOICE_PARSER_STEP1_PROMPT
+
+
+def test_invoice_prompt_defines_partnumber():
+    assert '"PARTNUMBER" (string) → "descrição do produto+size"' in INVOICE_PARSER_STEP1_PROMPT
 
 
 def test_normalize_sales_condition_fob():

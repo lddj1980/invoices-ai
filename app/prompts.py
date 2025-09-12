@@ -13,7 +13,7 @@ INVOICE_PARSER_STEP1_PROMPT = (
 - All numeric fields (e.g., quantities, weights, prices, financing_value) must have exactly 5 decimal places (pad with zeros if needed). Lookup codes are excluded.
 ### MERCADORIA SCHEMA
 - "ITEM" (string)
-- "PARTNUMBER" (string)
+- "PARTNUMBER" (string) → "descrição do produto+size"
 - "NOME DO EXPORTADOR" (string)
 - "EXPORTADOR É O FABRICANTE?" (boolean)
 - "FABRICANTE É CONHECIDO?" (boolean)
@@ -45,6 +45,7 @@ INVOICE_PARSER_STEP1_PROMPT = (
 - Example: "USD", "$" → {"code":"220"}.
 ### CONSISTENCY RULES
 - If "EXPORTADOR É O FABRICANTE?"=true, set "FABRICANTE É CONHECIDO?"=false and "NOME DO FABRICANTE" and "PAIS DO FABRICANTE" to "N/D". Only fill these fields when the exporter differs from the manufacturer.
+- Se "EXPORTADOR É O FABRICANTE?" = false, procure explicitamente na invoice o "NOME DO FABRICANTE" e o "PAIS DO FABRICANTE". Se encontrados, preencha os campos e marque "FABRICANTE É CONHECIDO?" = true; caso contrário, use "N/D" e "FABRICANTE É CONHECIDO?" = false.
 - Validate: "VALOR TOTAL NA CONDICAO VENDA" ≈ "VALOR UNIT. NA CONDICAO VENDA" × "QTDE UNID. COMERCIALIZADA" (±1%). Keep source values.
 - Convert all weights to kilograms (kg). If original is in lb/ton, convert to kg.
 - Reconcile product weights using PACKING LIST: match invoice items with packing list entries (by "PARTNUMBER"/"ITEM", dimension, or code). If packing list gives consolidated net weights, distribute proportionally to invoice quantities. Always fill "PESO LIQUIDO UNIT. (KG)" and "PESO LIQUIDO TOTAL (KG)" in kg. Validate that sum of "PESO LIQUIDO TOTAL (KG)" ≈ packing list total (±1%). If matching not possible, set "N/D" for weights.
