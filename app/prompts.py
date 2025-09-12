@@ -21,7 +21,7 @@ INVOICE_PARSER_STEP1_PROMPT = (
 - "PAIS DO FABRICANTE" (object | "N/D") → TAB-PAISES. Shape: {"code": <string>}
 - "APLICACAO" (string | "N/D")
 - "CONDICAO DE VENDA (INCOTERM)" (object) → TAB-COND.VENDA. Shape: {"code": <string>}
-- "COMPLEMENTO" (string | "N/D")
+- "COMPLEMENTO" (string | "N/D") → inclua informações sobre condições relacionadas ao frete, quando disponíveis na invoice
 - "UNIDADE COMERCIALIZADA" (object) → TAB-UNIDADES. Shape: {"code": <string>}
 - "QTDE UNID. COMERCIALIZADA" (number)
 - "QTDE UNID. ESTATISTICA" (number | "N/D")
