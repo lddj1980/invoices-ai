@@ -38,6 +38,7 @@ def test_invoice_prompt_enforces_exporter_manufacturer_rules():
 def test_invoice_prompt_guides_country_identification():
     assert '### IDENTIFICAÇÃO DO PAÍS DO FABRICANTE' in INVOICE_PARSER_STEP1_PROMPT
     assert 'Sempre converta esses códigos para o código oficial da TAB-PAISES' in INVOICE_PARSER_STEP1_PROMPT
+    assert 'Quando houver coluna ou rótulo "ORIGIN" seguido de um código ISO-2' in INVOICE_PARSER_STEP1_PROMPT
 def test_invoice_prompt_defines_partnumber():
     assert '"PARTNUMBER" (string) → "descrição do produto+size"' in INVOICE_PARSER_STEP1_PROMPT
 

@@ -50,6 +50,7 @@ INVOICE_PARSER_STEP1_PROMPT = (
 ### IDENTIFICAÇÃO DO PAÍS DO FABRICANTE
 - Priorize indícios próximos ao nome do fabricante como "Country of origin", "Origin", "Country", "Manufactured in", "Made in" ou colunas de tabelas com país.
 - Muitas invoices usam códigos ISO-2 (ex.: DK, DE, US). Sempre converta esses códigos para o código oficial da TAB-PAISES antes de preencher o JSON.
+- Quando houver coluna ou rótulo "ORIGIN" seguido de um código ISO-2 (ex.: "NL", "SE") na mesma linha do item, trate esse código como país do fabricante daquele produto, vinculando-o pelo PARTNUMBER, descrição ou referência explícita.
 - Se o documento trouxer listas de origem (ex.: "ORIGIN"/"ORIGIN COUNTRY") com múltiplos países, combine-as com a linha correta usando o PARTNUMBER, descrição ou referência explícita ao fabricante.
 - Aceite grafias alternativas e nomes completos de países (ex.: "Netherlands", "Países Baixos") ou abreviações presentes na lista ISO. Normalize sempre para o código de TAB-PAISES.
 - Caso só exista o país de origem do produto, use-o como proxy do país do fabricante apenas se estiver ligado claramente ao fabricante ou houver indicação de que a origem é onde foi fabricado.
