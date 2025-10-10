@@ -47,6 +47,13 @@ INVOICE_PARSER_STEP1_PROMPT = (
 - O exportador é a parte que vende ou envia os produtos. Procure cabeçalhos ou rótulos como "Exporter", "Exportador", "Supplier" ou "Seller". Não confunda com o consignatário ou importador.
 - O fabricante é a parte que produziu os produtos. Procure termos como "Manufacturer", "Fabricante", "Made by" ou "Produced by".
 - Se a invoice indicar explicitamente que o exportador também é o fabricante, marque "EXPORTADOR É O FABRICANTE?" = true.
+### IDENTIFICAÇÃO DO PAÍS DO FABRICANTE
+- Priorize indícios próximos ao nome do fabricante como "Country of origin", "Origin", "Country", "Manufactured in", "Made in" ou colunas de tabelas com país.
+- Muitas invoices usam códigos ISO-2 (ex.: DK, DE, US). Sempre converta esses códigos para o código oficial da TAB-PAISES antes de preencher o JSON.
+- Quando houver coluna ou rótulo "ORIGIN" seguido de um código ISO-2 (ex.: "NL", "SE") na mesma linha do item, trate esse código como país do fabricante daquele produto, vinculando-o pelo PARTNUMBER, descrição ou referência explícita.
+- Se o documento trouxer listas de origem (ex.: "ORIGIN"/"ORIGIN COUNTRY") com múltiplos países, combine-as com a linha correta usando o PARTNUMBER, descrição ou referência explícita ao fabricante.
+- Aceite grafias alternativas e nomes completos de países (ex.: "Netherlands", "Países Baixos") ou abreviações presentes na lista ISO. Normalize sempre para o código de TAB-PAISES.
+- Caso só exista o país de origem do produto, use-o como proxy do país do fabricante apenas se estiver ligado claramente ao fabricante ou houver indicação de que a origem é onde foi fabricado.
 ### CONSISTENCY RULES
 - If "EXPORTADOR É O FABRICANTE?"=true, set "FABRICANTE É CONHECIDO?"=false and "NOME DO FABRICANTE" and "PAIS DO FABRICANTE" to "N/D". Only fill these fields when the exporter differs from the manufacturer.
 - Se "EXPORTADOR É O FABRICANTE?" = false, procure explicitamente na invoice o "NOME DO FABRICANTE" e o "PAIS DO FABRICANTE". Se encontrados, preencha os campos e marque "FABRICANTE É CONHECIDO?" = true; caso contrário, use "N/D" e "FABRICANTE É CONHECIDO?" = false.
