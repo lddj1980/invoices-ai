@@ -11,7 +11,6 @@ INVOICE_PARSER_STEP1_PROMPT = (
 - Normalize numbers (no thousand separators, "." for decimals).
 - Normalize booleans to true/false. Default is false when absent.
 - All numeric fields (e.g., quantities, weights, prices, financing_value) must have exactly 5 decimal places (pad with zeros if needed). Lookup codes are excluded.
-
 ### MERCADORIA SCHEMA
 - "ITEM" (string)
 - "PARTNUMBER" (string) → "descrição do produto+size"
@@ -31,81 +30,38 @@ INVOICE_PARSER_STEP1_PROMPT = (
 - "VALOR TOTAL NA CONDICAO VENDA" (number)
 - "PESO LIQUIDO UNIT. (KG)" (number | "N/D") → always kilograms
 - "PESO LIQUIDO TOTAL (KG)" (number | "N/D") → always kilograms
-- "DESCRICAO COMPLEMENTAR" (string | "N/D")
-- "COBERTURA CAMBIAL" (string) → default "0000_A_0180DIAS" unless the PACKING LIST clearly indicates a payment term shorter than 180 days; in that case use the corresponding coverage code (e.g., "0000_A_0090DIAS" for payment in 90 days)
-- "MOT. SEM COBERTURA" (object | "N/D") → TAB-MOT.SEM.COBERTURA. Shape: {"code": <string>}; mandatory if "COBERTURA CAMBIAL" indicates no coverage
-- "INST. FINANCIADORA" (object | "N/D") → TAB-INST.FINANCIADORA. Shape: {"code": <string>}
+ - "DESCRICAO COMPLEMENTAR" (string | "N/D")
+ - "COBERTURA CAMBIAL" (string) → default "0000_A_0180DIAS" unless the PACKING LIST clearly indicates a payment term shorter than 180 days; in that case use the corresponding coverage code (e.g., "0000_A_0090DIAS" for payment in 90 days)
+ - "MOT. SEM COBERTURA" (object | "N/D") → TAB-MOT.SEM.COBERTURA. Shape: {"code": <string>}; mandatory if "COBERTURA CAMBIAL" indicates no coverage
+ - "INST. FINANCIADORA" (object | "N/D") → TAB-INST.FINANCIADORA. Shape: {"code": <string>}
 - "VALOR" (number | "N/D")
 - "Nº ROF/BACEN" (string | "N/D")
 - "FATURA/INVOICE" (string | "N/D")
 - "CFOP" (string | "N/D")
 - "FUNDAMENTO LEGAL" (object | "N/D") → TAB-FUNDAMENTOS_LEGAIS. Shape: {"code": <string>}
-
 ### LOOKUP BEHAVIOR
 - For every lookup field above, output only the lookup "code" (string) validated against the tables.
 - Accept invoice input as code, abbreviation, or name (case/accent insensitive). Normalize to the official code from the tables.
 - Example: "USD", "$" → {"code":"220"}.
-
 ### IDENTIFICAÇÃO DO EXPORTADOR E DO FABRICANTE
 - O exportador é a parte que vende ou envia os produtos. Procure cabeçalhos ou rótulos como "Exporter", "Exportador", "Supplier" ou "Seller". Não confunda com o consignatário ou importador.
 - O fabricante é a parte que produziu os produtos. Procure termos como "Manufacturer", "Fabricante", "Made by" ou "Produced by".
 - Se a invoice indicar explicitamente que o exportador também é o fabricante, marque "EXPORTADOR É O FABRICANTE?" = true.
-
-### IDENTIFICAÇÃO DO PAÍS DO FABRICANTE
-- Priorize indícios próximos ao nome do fabricante como "Country of origin", "Origin", "Country", "Manufactured in", "Made in" ou colunas de tabelas com país.
-- Inclua também ocorrências explícitas do termo "ORIGIN: XX" (geralmente junto de cada item), onde XX é um código ISO-2. Esse campo deve ser considerado como país de fabricação, mesmo quando o exportador for diferente.
-- Muitas invoices usam códigos ISO-2 (ex.: DK, DE, US). Sempre converta esses códigos para o código oficial da TAB-PAISES antes de preencher o JSON.
-- Quando houver coluna ou rótulo "ORIGIN" seguido de um código ISO-2 (ex.: "NL", "SE") na mesma linha do item, trate esse código como país do fabricante daquele produto, vinculando-o pelo PARTNUMBER, descrição ou referência explícita.
-- Se o documento trouxer listas de origem (ex.: "ORIGIN"/"ORIGIN COUNTRY") com múltiplos países, combine-as com a linha correta usando o PARTNUMBER, descrição ou referência explícita ao fabricante.
-- Aceite grafias alternativas e nomes completos de países (ex.: "Netherlands", "Países Baixos") ou abreviações presentes na lista ISO. Normalize sempre para o código de TAB-PAISES.
-- Sempre que houver campo ORIGIN, ORIGIN COUNTRY, ou menção explícita ao país de origem por produto, trate-o como o país do fabricante, mesmo sem nome explícito.
-
-### REGRAS DE PREENCHIMENTO QUANDO O PAÍS DE ORIGEM É INFORMADO MAS O FABRICANTE NÃO
-- Sempre que a invoice indicar "ORIGIN", "COUNTRY OF ORIGIN" ou "ORIGIN: <ISO2>" próximo de cada item, considere que o país indicado é o país do fabricante daquele produto, mesmo que o nome do fabricante não seja informado.
-- Nesse caso:
-  - Preencha "FABRICANTE É CONHECIDO?" = true.
-  - "NOME DO FABRICANTE" = "N/D".
-  - "PAIS DO FABRICANTE" deve ser sempre preenchido com o objeto {"code": <código TAB-PAISES>} correspondente ao valor de ORIGIN.
-- Exemplo:
-  - ORIGIN: SE → {"code":"752"}
-  - ORIGIN: NL → {"code":"528"}
-  - ORIGIN: FR → {"code":"250"}
-  - ORIGIN: IT → {"code":"380"}
-  - ORIGIN: DE → {"code":"276"}
-- Se houver múltiplos valores de ORIGIN diferentes na invoice, atribua a cada linha o país correspondente de acordo com o item, partnumber ou descrição.
-- Nunca deixe "PAIS DO FABRICANTE" como "N/D" quando houver indicação de ORIGIN.
-- Caso o exportador esteja localizado em um país diferente do ORIGIN, marque "EXPORTADOR É O FABRICANTE?" = false.
-
-### REGRAS ESPECIAIS PARA EXPORTADORES COM MÚLTIPLAS ORIGENS
-- Quando o exportador for identificado como uma empresa europeia com endereço único (ex.: Diesel Technic SE, Kirchdorf/Germany), mas houver menções a "ORIGIN: <ISO2>" diferentes de "DE" (ex.: SE, NL, FR, IT), interprete que:
-  - O exportador **NÃO É o fabricante**.
-  - Cada linha da invoice deve receber "PAIS DO FABRICANTE" conforme o valor em "ORIGIN".
-  - Preencha "FABRICANTE É CONHECIDO?" = true e "EXPORTADOR É O FABRICANTE?" = false.
-  - "NOME DO FABRICANTE" = "N/D" (quando não indicado explicitamente).
-- Se o "ORIGIN" coincidir com o país do exportador (ex.: ORIGIN: DE e exportador na Alemanha), então "EXPORTADOR É O FABRICANTE?" = true.
-- Sempre priorize o campo ou rótulo "ORIGIN" ou "COUNTRY OF ORIGIN" quando presente por item — ele indica o país de fabricação.
-- Quando múltiplos países aparecerem no documento (ex.: SE, NL, FR, IT), cada produto deve herdar o país correto conforme o bloco "ORIGIN" da mesma linha ou da família de itens correspondente.
-- Ao gerar o JSON, normalize o país do fabricante usando TAB-PAISES (ex.: SE → {"code":"752"}; NL → {"code":"528"}; FR → {"code":"250"}; IT → {"code":"380"}; DE → {"code":"276"}).
-
 ### CONSISTENCY RULES
 - If "EXPORTADOR É O FABRICANTE?"=true, set "FABRICANTE É CONHECIDO?"=false and "NOME DO FABRICANTE" and "PAIS DO FABRICANTE" to "N/D". Only fill these fields when the exporter differs from the manufacturer.
 - Se "EXPORTADOR É O FABRICANTE?" = false, procure explicitamente na invoice o "NOME DO FABRICANTE" e o "PAIS DO FABRICANTE". Se encontrados, preencha os campos e marque "FABRICANTE É CONHECIDO?" = true; caso contrário, use "N/D" e "FABRICANTE É CONHECIDO?" = false.
 - Validate: "VALOR TOTAL NA CONDICAO VENDA" ≈ "VALOR UNIT. NA CONDICAO VENDA" × "QTDE UNID. COMERCIALIZADA" (±1%). Keep source values.
 - Convert all weights to kilograms (kg). If original is in lb/ton, convert to kg.
 - Reconcile product weights using PACKING LIST: match invoice items with packing list entries (by "PARTNUMBER"/"ITEM", dimension, or code). If packing list gives consolidated net weights, distribute proportionally to invoice quantities. Always fill "PESO LIQUIDO UNIT. (KG)" and "PESO LIQUIDO TOTAL (KG)" in kg. Validate that sum of "PESO LIQUIDO TOTAL (KG)" ≈ packing list total (±1%). If matching not possible, set "N/D" for weights.
-- Default "COBERTURA CAMBIAL" to "0000_A_0180DIAS" unless the PACKING LIST specifies a payment term shorter than 180 days; then select the matching coverage code.
-- If "COBERTURA CAMBIAL" denotes no coverage, "MOT. SEM COBERTURA" is mandatory with valid lookup code.
-- "FUNDAMENTO LEGAL": detect any law/decree/regulation reference and map to TAB-FUNDAMENTOS_LEGAIS.
-
+ - Default "COBERTURA CAMBIAL" to "0000_A_0180DIAS" unless the PACKING LIST specifies a payment term shorter than 180 days; then select the matching coverage code.
+ - If "COBERTURA CAMBIAL" denotes no coverage, "MOT. SEM COBERTURA" is mandatory with valid lookup code.
+ - "FUNDAMENTO LEGAL": detect any law/decree/regulation reference and map to TAB-FUNDAMENTOS_LEGAIS.
 ### OUTPUT FORMAT
 - One valid JSON array. One object per product (from INVOICE). Do not output pallets or consolidated rows. Use PACKING LIST only for weights. No trailing commas. No comments.
-
 ### Embedded lookup tables (authoritative; use exactly as provided):
 """
     + LOOKUP_TABLES
 )
-
-
 
 
 INVOICE_PARSER_STEP2_PROMPT = """
