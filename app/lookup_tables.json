@@ -21,7 +21,17 @@
   "incoterms": [
     {"code": "CFR", "name": "CFR - COST AND FREIGHT"},
     {"code": "CIF", "name": "CIF - COST. INSURANCE AND FREIGHT"},
-    {"code": "FOB", "name": "FOB - FREE ON BOARD"}
+    {"code": "CIP", "name": "CIP - CARRIAGE AND INSURANCE PAID TO"},
+    {"code": "CPT", "name": "CPT - CARRIAGE PAID TO"},
+    {"code": "C_F", "name": "C+F - COST PLUS FREIGHT"},
+    {"code": "C_I", "name": "C+I - COST PLUS INSURANCE"},
+    {"code": "DAP", "name": "DAP - DELIVERED AT PLACE"},
+    {"code": "DAT", "name": "DAT - DELIVERED AT TERMINAL"},
+    {"code": "EXW", "name": "EXW - EX WORKS"},
+    {"code": "FAS", "name": "FAS - FREE ALONGSIDE SHIP"},
+    {"code": "FCA", "name": "FCA - FREE CARRIER"},
+    {"code": "FOB", "name": "FOB - FREE ON BOARD"},
+    {"code": "OCV", "name": "OCV - OUTRA CONDICAO DE VENDA"}
   ],
   "financing_institutions": [
     {"code": "1", "name": "AID - AGENCY FOR INTERNATIONAL DEVELOPMENT (AGENCIA PARA O DESENVOLVIMENTO INTERNACIONAL) - ESTADOS UNIDOS"},

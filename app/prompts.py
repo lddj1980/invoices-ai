@@ -47,6 +47,12 @@ INVOICE_PARSER_STEP1_PROMPT = (
 - O exportador é a parte que vende ou envia os produtos. Procure cabeçalhos ou rótulos como "Exporter", "Exportador", "Supplier" ou "Seller". Não confunda com o consignatário ou importador.
 - O fabricante é a parte que produziu os produtos. Procure termos como "Manufacturer", "Fabricante", "Made by" ou "Produced by".
 - Se a invoice indicar explicitamente que o exportador também é o fabricante, marque "EXPORTADOR É O FABRICANTE?" = true.
+### IDENTIFICAÇÃO DA CONDIÇÃO DE VENDA (INCOTERM)
+- Analise a seção comercial da invoice (geralmente próxima a valores totais, cabeçalhos "Terms", "Conditions", "Sale Terms" ou "Incoterm").
+- Procure explicitamente as abreviações oficiais (CFR, CIF, CIP, CPT, C+F, C+I, DAP, DAT, EXW, FAS, FCA, FOB) ou as descrições completas listadas em TAB-COND.VENDA.
+- Considere variações de espaçamento ou pontuação (ex.: "C&F", "Cost and Freight", "Free On Board").
+- Se a invoice mencionar uma condição diferente não listada, ou utilizar apenas um texto genérico sem sigla padrão, selecione "OCV" e registre o texto original em "COMPLEMENTO".
+- Quando múltiplas condições aparecerem, priorize a indicada como vigente (ex.: marcada, destacada ou próxima aos valores finais). Em caso de conflito sem destaque claro, use "OCV" e descreva no complemento.
 ### CONSISTENCY RULES
 - If "EXPORTADOR É O FABRICANTE?"=true, set "FABRICANTE É CONHECIDO?"=false and "NOME DO FABRICANTE" and "PAIS DO FABRICANTE" to "N/D". Only fill these fields when the exporter differs from the manufacturer.
 - Se "EXPORTADOR É O FABRICANTE?" = false, procure explicitamente na invoice o "NOME DO FABRICANTE" e o "PAIS DO FABRICANTE". Se encontrados, preencha os campos e marque "FABRICANTE É CONHECIDO?" = true; caso contrário, use "N/D" e "FABRICANTE É CONHECIDO?" = false.
