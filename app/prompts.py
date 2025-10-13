@@ -30,10 +30,10 @@ INVOICE_PARSER_STEP1_PROMPT = (
 - "VALOR TOTAL NA CONDICAO VENDA" (number)
 - "PESO LIQUIDO UNIT. (KG)" (number | "N/D") → always kilograms
 - "PESO LIQUIDO TOTAL (KG)" (number | "N/D") → always kilograms
- - "DESCRICAO COMPLEMENTAR" (string | "N/D")
- - "COBERTURA CAMBIAL" (string) → default "0000_A_0180DIAS" unless the PACKING LIST clearly indicates a payment term shorter than 180 days; in that case use the corresponding coverage code (e.g., "0000_A_0090DIAS" for payment in 90 days)
- - "MOT. SEM COBERTURA" (object | "N/D") → TAB-MOT.SEM.COBERTURA. Shape: {"code": <string>}; mandatory if "COBERTURA CAMBIAL" indicates no coverage
- - "INST. FINANCIADORA" (object | "N/D") → TAB-INST.FINANCIADORA. Shape: {"code": <string>}
+- "DESCRICAO COMPLEMENTAR" (string | "N/D")
+- "COBERTURA CAMBIAL" (string) → default "0000_A_0180DIAS" unless the PACKING LIST clearly indicates a payment term shorter than 180 days; in that case use the corresponding coverage code (e.g., "0000_A_0090DIAS" for payment in 90 days)
+- "MOT. SEM COBERTURA" (object | "N/D") → TAB-MOT.SEM.COBERTURA. Shape: {"code": <string>}; mandatory if "COBERTURA CAMBIAL" indicates no coverage
+- "INST. FINANCIADORA" (object | "N/D") → TAB-INST.FINANCIADORA. Shape: {"code": <string>}
 - "VALOR" (number | "N/D")
 - "Nº ROF/BACEN" (string | "N/D")
 - "FATURA/INVOICE" (string | "N/D")
@@ -47,6 +47,10 @@ INVOICE_PARSER_STEP1_PROMPT = (
 - O exportador é a parte que vende ou envia os produtos. Procure cabeçalhos ou rótulos como "Exporter", "Exportador", "Supplier" ou "Seller". Não confunda com o consignatário ou importador.
 - O fabricante é a parte que produziu os produtos. Procure termos como "Manufacturer", "Fabricante", "Made by" ou "Produced by".
 - Se a invoice indicar explicitamente que o exportador também é o fabricante, marque "EXPORTADOR É O FABRICANTE?" = true.
+- Além disso, identifique o país de origem de cada produto com base em linhas contendo **"ORIGIN:"** seguidas de um código ISO ou nome de país (ex.: "ORIGIN: SE", "ORIGIN: DE", "ORIGIN: FR", "ORIGIN: IT", "ORIGIN: NL").  
+  - Use essa informação para preencher o campo **"PAIS DO FABRICANTE"** → {"code": <string>} de acordo com a tabela TAB-PAISES.  
+  - Caso múltiplas origens apareçam na mesma invoice, associe cada uma à respectiva linha do produto.  
+  - Se o país de origem não estiver presente, use "N/D".
 ### IDENTIFICAÇÃO DA CONDIÇÃO DE VENDA (INCOTERM)
 - Analise a seção comercial da invoice (geralmente próxima a valores totais, cabeçalhos "Terms", "Conditions", "Sale Terms" ou "Incoterm").
 - Procure explicitamente as abreviações oficiais (CFR, CIF, CIP, CPT, C+F, C+I, DAP, DAT, EXW, FAS, FCA, FOB) ou as descrições completas listadas em TAB-COND.VENDA.
@@ -59,16 +63,15 @@ INVOICE_PARSER_STEP1_PROMPT = (
 - Validate: "VALOR TOTAL NA CONDICAO VENDA" ≈ "VALOR UNIT. NA CONDICAO VENDA" × "QTDE UNID. COMERCIALIZADA" (±1%). Keep source values.
 - Convert all weights to kilograms (kg). If original is in lb/ton, convert to kg.
 - Reconcile product weights using PACKING LIST: match invoice items with packing list entries (by "PARTNUMBER"/"ITEM", dimension, or code). If packing list gives consolidated net weights, distribute proportionally to invoice quantities. Always fill "PESO LIQUIDO UNIT. (KG)" and "PESO LIQUIDO TOTAL (KG)" in kg. Validate that sum of "PESO LIQUIDO TOTAL (KG)" ≈ packing list total (±1%). If matching not possible, set "N/D" for weights.
- - Default "COBERTURA CAMBIAL" to "0000_A_0180DIAS" unless the PACKING LIST specifies a payment term shorter than 180 days; then select the matching coverage code.
- - If "COBERTURA CAMBIAL" denotes no coverage, "MOT. SEM COBERTURA" is mandatory with valid lookup code.
- - "FUNDAMENTO LEGAL": detect any law/decree/regulation reference and map to TAB-FUNDAMENTOS_LEGAIS.
+- Default "COBERTURA CAMBIAL" to "0000_A_0180DIAS" unless the PACKING LIST specifies a payment term shorter than 180 days; then select the matching coverage code.
+- If "COBERTURA CAMBIAL" denotes no coverage, "MOT. SEM COBERTURA" is mandatory with valid lookup code.
+- "FUNDAMENTO LEGAL": detect any law/decree/regulation reference and map to TAB-FUNDAMENTOS_LEGAIS.
 ### OUTPUT FORMAT
 - One valid JSON array. One object per product (from INVOICE). Do not output pallets or consolidated rows. Use PACKING LIST only for weights. No trailing commas. No comments.
 ### Embedded lookup tables (authoritative; use exactly as provided):
 """
     + LOOKUP_TABLES
 )
-
 
 INVOICE_PARSER_STEP2_PROMPT = """
 You are a post-processor for import/export data. Read two inputs from the provided sources:
