@@ -30,7 +30,10 @@ try:  # pragma: no cover - availability depends on runtime environment
 except Exception:  # pragma: no cover
     image_to_text = None  # type: ignore
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(name)s:%(lineno)d | %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 try:  # pragma: no cover - handled via tests
@@ -49,9 +52,17 @@ WEBHOOK_URL = "https://pemmlybnqjvpxmgzxqhl.supabase.co/functions/v1/webhook-inv
 def _cleanup_jobs() -> None:
     """Remove jobs older than ``JOBS_TTL_SECONDS`` to prevent unbounded growth."""
     now = time.time()
-    expired = [jid for jid, info in jobs.items() if now - info.get("created_at", now) > JOBS_TTL_SECONDS]
+    logger.debug("Running job cleanup at %.3f with %d jobs tracked", now, len(jobs))
+    expired = [
+        jid
+        for jid, info in jobs.items()
+        if now - info.get("created_at", now) > JOBS_TTL_SECONDS
+    ]
+    if expired:
+        logger.info("Removing %d expired jobs: %s", len(expired), expired)
     for jid in expired:
         jobs.pop(jid, None)
+    logger.debug("Cleanup complete. Remaining jobs: %d", len(jobs))
 
 
 def _post_webhook(payload: dict) -> None:
@@ -65,9 +76,17 @@ def _post_webhook(payload: dict) -> None:
     request = urllib.request.Request(
         WEBHOOK_URL, data=data, headers={"Content-Type": "application/json"}
     )
+    logger.debug(
+        "Dispatching webhook to %s with payload keys: %s",
+        WEBHOOK_URL,
+        list(payload),
+    )
     try:
         with urllib.request.urlopen(request, timeout=10):  # nosec B310 - trusted URL
-            logger.debug("Webhook dispatched: %s", payload)
+            logger.info(
+                "Webhook dispatched successfully for external_job_id=%s",
+                payload.get("external_job_id"),
+            )
     except urllib.error.URLError as exc:
         logger.error("Failed to dispatch webhook: %s", exc)
 
@@ -75,8 +94,10 @@ def _post_webhook(payload: dict) -> None:
 def _notify_webhook(job_id: str) -> None:
     """Dispatch webhook notifications when a job finishes."""
 
+    logger.debug("Notifying webhook for job_id=%s", job_id)
     job = jobs.get(job_id)
     if not job:
+        logger.warning("Job %s not found during webhook notification", job_id)
         return
 
     external_job_id = job.get("external_job_id")
@@ -84,6 +105,7 @@ def _notify_webhook(job_id: str) -> None:
         return
 
     status = job.get("status")
+    logger.debug("Job %s current status: %s", job_id, status)
     if status == "done":
         payload = {
             "external_job_id": external_job_id,
@@ -108,12 +130,20 @@ def _notify_webhook(job_id: str) -> None:
 def _finalize_job(job_id: str, status: str, result) -> None:
     """Update job status/result and emit webhook notifications when required."""
 
+    logger.debug("Finalizing job %s with status %s", job_id, status)
     job = jobs.get(job_id)
     if job is None:
+        logger.warning("Attempted to finalize unknown job %s", job_id)
         return
 
     job["status"] = status
     job["result"] = result
+    logger.info(
+        "Job %s finalized. Status=%s | Result type=%s",
+        job_id,
+        status,
+        type(result).__name__,
+    )
     _notify_webhook(job_id)
 
 
@@ -138,14 +168,29 @@ class InMemoryVectorStore:
         self.chunks: List[str] = []
 
     def add_document(self, text: str) -> None:
-        logger.info("Adding document with %d characters to vector store", len(text))
+        logger.info(
+            "Adding document with %d characters to vector store (current_chunks=%d)",
+            len(text),
+            len(self.chunks),
+        )
         self.chunks.extend(_split_into_chunks(text))
         logger.debug("Vector store now holds %d chunks", len(self.chunks))
 
     def search(self, query: str, top_k: int = 3) -> List[str]:
-        logger.info("Searching vector store for query '%s' (top_k=%d)", query, top_k)
-        results = [chunk for _, chunk in select_relevant_chunks(query, self.chunks, top_k=top_k)]
-        logger.debug("Search returned %d chunks", len(results))
+        logger.info(
+            "Searching vector store for query '%s' (top_k=%d | total_chunks=%d)",
+            query,
+            top_k,
+            len(self.chunks),
+        )
+        results = [
+            chunk for _, chunk in select_relevant_chunks(query, self.chunks, top_k=top_k)
+        ]
+        logger.debug(
+            "Search returned %d chunks. First chunk preview: %s",
+            len(results),
+            (results[0][:80] + "...") if results else None,
+        )
         return results
 
 
@@ -175,6 +220,7 @@ DEFAULT_PDF_FALLBACK_PROMPT_PREFIX = (
 
 def _json_to_pdf(data: Dict) -> bytes:
     """Convert a JSON-serializable object to PDF bytes."""
+    logger.info("Converting JSON payload to PDF (keys=%s)", list(data)[:10])
     try:  # pragma: no cover - availability depends on runtime
         from fpdf import FPDF
     except Exception as exc:  # pragma: no cover - environment dependent
@@ -185,9 +231,12 @@ def _json_to_pdf(data: Dict) -> bytes:
     pdf.add_page()
     pdf.set_font("Arial", size=12)
     json_str = json.dumps(data, indent=2, ensure_ascii=False)
+    logger.debug("JSON converted to string with %d characters", len(json_str))
     for line in json_str.splitlines():
         pdf.multi_cell(0, 10, line)
-    return pdf.output(dest="S").encode("latin-1")
+    pdf_bytes = pdf.output(dest="S").encode("latin-1")
+    logger.info("Generated PDF with %d bytes from JSON", len(pdf_bytes))
+    return pdf_bytes
 
 def _extract_text(content: bytes, filename: str) -> str:
     """Extract text from ``content`` using PDF parsing or OCR.
@@ -197,17 +246,21 @@ def _extract_text(content: bytes, filename: str) -> str:
     UTF-8 text.
     """
 
-    logger.info("Extracting text from file '%s'", filename)
+    logger.info("Extracting text from file '%s' (%d bytes)", filename, len(content))
     if filename.lower().endswith(".pdf"):
         logger.debug("File detected as PDF")
         if PdfReader is not None:
             try:
                 reader = PdfReader(io.BytesIO(content))
-                text = "".join(
-                    page.extract_text() or "" for page in reader.pages
-                ).strip()
+                page_count = len(reader.pages)
+                logger.debug("PdfReader initialized with %d pages", page_count)
+                text = "".join(page.extract_text() or "" for page in reader.pages).strip()
                 if text:
-                    logger.debug("Text extracted via PyPDF2 (%d chars)", len(text))
+                    logger.info(
+                        "Text extracted via PyPDF2 (%d chars | pages=%d)",
+                        len(text),
+                        page_count,
+                    )
                     return text
             except Exception as exc:
                 logger.warning("PyPDF2 extraction failed: %s", exc)
@@ -221,7 +274,9 @@ def _extract_text(content: bytes, filename: str) -> str:
 
             try:
                 ocr = PaddleOCR(use_angle_cls=True, lang="pt")
+                logger.debug("Running PaddleOCR on temporary file %s", tmp_path)
                 result = ocr.ocr(tmp_path)
+                logger.debug("PaddleOCR returned %d pages", len(result) if result else 0)
             finally:
                 os.remove(tmp_path)
 
@@ -231,7 +286,7 @@ def _extract_text(content: bytes, filename: str) -> str:
                 if page
             ).strip()
             if text:
-                logger.debug("Text extracted via OCR (%d chars)", len(text))
+                logger.info("Text extracted via OCR (%d chars)", len(text))
                 return text
         except Exception as exc:
             logger.error("OCR extraction failed: %s", exc)
@@ -245,7 +300,7 @@ def _extract_text(content: bytes, filename: str) -> str:
         try:
             text = image_to_text(content)
             if text:
-                logger.debug("Text extracted via image OCR (%d chars)", len(text))
+                logger.info("Text extracted via image OCR (%d chars)", len(text))
                 return text
         except Exception as exc:
             logger.error("Image OCR failed: %s", exc)
@@ -253,7 +308,7 @@ def _extract_text(content: bytes, filename: str) -> str:
 
     try:
         text = content.decode("utf-8")
-        logger.debug("Text extracted from non-PDF (%d chars)", len(text))
+        logger.info("Text extracted from non-PDF (%d chars)", len(text))
         return text
     except UnicodeDecodeError as exc:
         logger.error("Invalid file encoding: %s", exc)
@@ -268,6 +323,7 @@ async def upload_invoice_text(file: UploadFile = File(...)):
     logger.debug("Read %d bytes from uploaded file", len(content))
     text = _extract_text(content, file.filename)
     logger.info("Extracted %d characters of text", len(text))
+    logger.debug("Returning text payload preview: %s", text[:200])
     return {"filename": file.filename, "text": text}
 
 
@@ -282,6 +338,7 @@ async def upload_invoice(file: UploadFile = File(...)):
 
     vector_store.add_document(text)
     try:
+        logger.debug("Starting field identification using %d stored chunks", len(vector_store.chunks))
         fields = identify_fields(text, FIELD_RULES, vector_store.chunks)
         logger.debug("Identified fields: %s", fields)
         headers = extract_product_headers(text, vector_store.chunks)
@@ -292,6 +349,7 @@ async def upload_invoice(file: UploadFile = File(...)):
         logger.error("Environment configuration error: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    logger.info("Invoice processing completed successfully for '%s'", file.filename)
     return {"filename": file.filename, "fields": fields}
 
 
@@ -356,6 +414,7 @@ async def invoices_gpt(file: UploadFile = File(...)):
         logger.error("OpenAI API call failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    logger.info("/invoices-gpt completed successfully for file '%s'", file.filename)
     return {"file_id": file_id, "result": result_text}
 
 
@@ -375,6 +434,13 @@ async def invoice_json_gpt_pdf(
     logger.info(
         "/invoice-json-gpt-pdf called with packing_list '%s'", packing_list.filename
     )
+    if prompt:
+        logger.debug(
+            "Custom prompt provided (%d chars) for invoice_json_gpt_pdf",
+            len(prompt),
+        )
+    else:
+        logger.debug("No custom prompt provided for invoice_json_gpt_pdf")
 
     if not packing_list.filename.lower().endswith(".pdf"):
         logger.error("File is not a PDF: %s", packing_list.filename)
@@ -402,6 +468,11 @@ async def invoice_json_gpt_pdf(
     )
 
     job_id = str(uuid.uuid4())
+    logger.info(
+        "Scheduling invoice_json_gpt_pdf job_id=%s (external_job_id=%s)",
+        job_id,
+        external_job_id,
+    )
     jobs[job_id] = {
         "status": "pending",
         "result": None,
@@ -412,6 +483,7 @@ async def invoice_json_gpt_pdf(
     background_tasks.add_task(
         _process_invoices_gpt_pdf, job_id, packing_contents, invoice_contents, prompt
     )
+    logger.debug("Background task registered for job_id=%s", job_id)
     return {"job_id": job_id}
 
 
@@ -429,6 +501,13 @@ async def invoices_gpt_pdf(
         packing_list.filename,
         invoice.filename,
     )
+    if prompt:
+        logger.debug(
+            "Custom prompt provided (%d chars) for invoices_gpt_pdf",
+            len(prompt),
+        )
+    else:
+        logger.debug("No custom prompt provided for invoices_gpt_pdf")
 
     for f in (packing_list, invoice):
         if not f.filename.lower().endswith(".pdf"):
@@ -444,6 +523,11 @@ async def invoices_gpt_pdf(
     )
 
     job_id = str(uuid.uuid4())
+    logger.info(
+        "Scheduling invoices_gpt_pdf job_id=%s (external_job_id=%s)",
+        job_id,
+        external_job_id,
+    )
     jobs[job_id] = {
         "status": "pending",
         "result": None,
@@ -454,6 +538,7 @@ async def invoices_gpt_pdf(
     background_tasks.add_task(
         _process_invoices_gpt_pdf, job_id, packing_contents, invoice_contents, prompt
     )
+    logger.debug("Background task registered for job_id=%s", job_id)
     return {"job_id": job_id}
 
 
@@ -464,6 +549,13 @@ def _process_invoices_gpt_pdf(
     prompt: str | None,
 ) -> None:
     """Executa o processamento pesado e armazena o resultado em ``jobs``."""
+    logger.info(
+        "Starting _process_invoices_gpt_pdf for job_id=%s | packing_bytes=%d | invoice_bytes=%d | prompt=%s",
+        job_id,
+        len(packing_contents),
+        len(invoice_contents),
+        "custom" if prompt else "default",
+    )
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         _finalize_job(job_id, "error", "OPENAI_API_KEY is not set")
@@ -479,6 +571,9 @@ def _process_invoices_gpt_pdf(
     custom_prompt = prompt is not None
     if prompt is None:
         prompt = DEFAULT_PDF_PROMPT
+        logger.debug("Using default PDF prompt")
+    else:
+        logger.debug("Using custom prompt with %d characters", len(prompt))
 
     uploaded_ids: dict[str, str] = {}
     result_text = ""
@@ -513,10 +608,16 @@ def _process_invoices_gpt_pdf(
                 result_text = response.output[0].content[0].text
             except Exception:
                 result_text = str(response)
+        logger.debug(
+            "OpenAI response received for job_id=%s (custom_prompt=%s)",
+            job_id,
+            custom_prompt,
+        )
 
     except Exception as exc:
         logger.error("OpenAI API call (PDF) failed: %s", exc)
         try:
+            logger.info("Falling back to local text extraction for job_id=%s", job_id)
             pack_text = _extract_text(packing_contents, "packing_list.pdf")
             inv_text = _extract_text(invoice_contents, "invoice.pdf")
             combined = f"Packing List:\n{pack_text}\n\nInvoice:\n{inv_text}"
@@ -541,6 +642,7 @@ def _process_invoices_gpt_pdf(
             )
             result_text = getattr(response, "output_text", None) or str(response)
             uploaded_ids = {}
+            logger.info("Fallback OpenAI text-only call succeeded for job_id=%s", job_id)
         except Exception as exc_inner:
             logger.error("Fallback local extraction also failed: %s", exc_inner)
             _finalize_job(job_id, "error", str(exc_inner))
@@ -557,6 +659,7 @@ def _process_invoices_gpt_pdf(
         "done",
         {"file_ids": uploaded_ids or None, "result": result_text},
     )
+    logger.info("_process_invoices_gpt_pdf completed successfully for job_id=%s", job_id)
 
 
 def _process_invoice_parser(
@@ -570,6 +673,12 @@ def _process_invoice_parser(
     :data:`INVOICE_PARSER_STEP2_PROMPT` to complete the weight fields.
     """
 
+    logger.info(
+        "Starting _process_invoice_parser for job_id=%s | packing_bytes=%d | invoice_bytes=%d",
+        job_id,
+        len(packing_contents),
+        len(invoice_contents),
+    )
     stage1_job = f"{job_id}_stage1"
     jobs[stage1_job] = {"status": "pending", "result": None, "created_at": time.time()}
     _process_invoices_gpt_pdf(
@@ -577,6 +686,7 @@ def _process_invoice_parser(
     )
     stage1 = jobs.pop(stage1_job, None)
     if not stage1 or stage1.get("status") != "done":
+        logger.error("Stage 1 failed for job_id=%s with result=%s", job_id, stage1)
         _finalize_job(job_id, "error", stage1.get("result") if stage1 else None)
         return
 
@@ -586,21 +696,26 @@ def _process_invoice_parser(
     try:
         invoice_json = json.loads(result_text)
     except Exception:
+        logger.error("Invalid JSON output from stage 1 for job_id=%s", job_id)
         _finalize_job(job_id, "error", "Invalid JSON from stage 1")
         return
 
     try:
         invoice_pdf = _json_to_pdf(invoice_json)
     except HTTPException as exc:
+        logger.error("Failed to convert stage 1 JSON to PDF for job_id=%s: %s", job_id, exc.detail)
         _finalize_job(job_id, "error", exc.detail)
         return
     except Exception as exc:  # pragma: no cover
+        logger.error("Unexpected error creating PDF for job_id=%s: %s", job_id, exc)
         _finalize_job(job_id, "error", str(exc))
         return
 
+    logger.info("Stage 1 completed successfully for job_id=%s, launching stage 2", job_id)
     _process_invoices_gpt_pdf(
         job_id, packing_contents, invoice_pdf, INVOICE_PARSER_STEP2_PROMPT
     )
+    logger.info("_process_invoice_parser finished for job_id=%s", job_id)
 
 
 @app.post("/invoice-parser")
@@ -622,8 +737,18 @@ async def invoice_parser(
 
     packing_contents = await packing_list.read()
     invoice_contents = await invoice.read()
+    logger.debug(
+        "Read %d bytes for packing_list and %d bytes for invoice in invoice_parser",
+        len(packing_contents),
+        len(invoice_contents),
+    )
 
     job_id = str(uuid.uuid4())
+    logger.info(
+        "Scheduling invoice_parser job_id=%s (external_job_id=%s)",
+        job_id,
+        external_job_id,
+    )
     jobs[job_id] = {
         "status": "pending",
         "result": None,
@@ -634,6 +759,7 @@ async def invoice_parser(
     background_tasks.add_task(
         _process_invoice_parser, job_id, packing_contents, invoice_contents
     )
+    logger.debug("Background task registered for invoice_parser job_id=%s", job_id)
     return {"job_id": job_id}
 
 
@@ -644,6 +770,7 @@ async def get_invoice_parser(job_id: str):
     job = jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    logger.debug("Returning status for invoice_parser job_id=%s: %s", job_id, job["status"])
     return {"status": job["status"], "result": job["result"]}
 
 
@@ -654,6 +781,7 @@ async def get_invoices_gpt_pdf(job_id: str):
     job = jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    logger.debug("Returning status for invoices_gpt_pdf job_id=%s: %s", job_id, job["status"])
     return {"status": job["status"], "result": job["result"]}
 
 
