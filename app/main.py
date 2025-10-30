@@ -116,11 +116,7 @@ def _notify_webhook(job_id: str) -> None:
         logger.warning("Job %s not found during webhook notification", job_id)
         return
 
-    external_job_id = job.get("external_job_id")
-    if not external_job_id:
-        logger.debug("Job %s has no external_job_id; webhook will not be sent", job_id)
-        return
-
+    external_job_id = job_id
     status = job.get("status")
     logger.debug("Job %s current status: %s", job_id, status)
     if status == "done":
