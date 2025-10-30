@@ -77,16 +77,32 @@ def _post_webhook(payload: dict) -> None:
         WEBHOOK_URL, data=data, headers={"Content-Type": "application/json"}
     )
     logger.debug(
-        "Dispatching webhook to %s with payload keys: %s",
+        "Dispatching webhook to %s with payload keys: %s | payload=%s",
         WEBHOOK_URL,
         list(payload),
+        payload,
     )
     try:
-        with urllib.request.urlopen(request, timeout=10):  # nosec B310 - trusted URL
+        with urllib.request.urlopen(request, timeout=10) as response:  # nosec B310 - trusted URL
+            status = getattr(response, "status", None)
+            reason = getattr(response, "reason", "")
+            body = response.read().decode("utf-8", errors="ignore")
             logger.info(
-                "Webhook dispatched successfully for external_job_id=%s",
+                "Webhook dispatched successfully for external_job_id=%s | status=%s | reason=%s",
                 payload.get("external_job_id"),
+                status,
+                reason,
             )
+            if body:
+                logger.debug("Webhook response body: %s", body)
+    except urllib.error.HTTPError as exc:
+        response_text = exc.read().decode("utf-8", errors="ignore") if hasattr(exc, "read") else ""
+        logger.error(
+            "Failed to dispatch webhook: HTTP %s %s | response=%s",
+            exc.code,
+            exc.reason,
+            response_text,
+        )
     except urllib.error.URLError as exc:
         logger.error("Failed to dispatch webhook: %s", exc)
 
@@ -102,6 +118,7 @@ def _notify_webhook(job_id: str) -> None:
 
     external_job_id = job.get("external_job_id")
     if not external_job_id:
+        logger.debug("Job %s has no external_job_id; webhook will not be sent", job_id)
         return
 
     status = job.get("status")
@@ -122,8 +139,20 @@ def _notify_webhook(job_id: str) -> None:
             "error_message": error_message if isinstance(error_message, str) else str(error_message),
         }
     else:
+        logger.debug(
+            "Job %s status %s does not trigger webhook (external_job_id=%s)",
+            job_id,
+            status,
+            external_job_id,
+        )
         return
 
+    logger.debug(
+        "Prepared webhook payload for job_id=%s | external_job_id=%s | status=%s",
+        job_id,
+        external_job_id,
+        payload.get("status"),
+    )
     _post_webhook(payload)
 
 
