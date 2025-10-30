@@ -1,6 +1,7 @@
 import io
 import os
 import tempfile
+import textwrap
 import logging
 import uuid
 import time
@@ -153,10 +154,15 @@ def _notify_webhook(job_id: str) -> None:
     _post_webhook(payload)
 
 
-def _finalize_job(job_id: str, status: str, result) -> None:
+def _finalize_job(job_id: str, status: str, result, *, notify_webhook: bool = True) -> None:
     """Update job status/result and emit webhook notifications when required."""
 
-    logger.debug("Finalizing job %s with status %s", job_id, status)
+    logger.debug(
+        "Finalizing job %s with status %s (notify_webhook=%s)",
+        job_id,
+        status,
+        notify_webhook,
+    )
     job = jobs.get(job_id)
     if job is None:
         logger.warning("Attempted to finalize unknown job %s", job_id)
@@ -170,7 +176,16 @@ def _finalize_job(job_id: str, status: str, result) -> None:
         status,
         type(result).__name__,
     )
-    _notify_webhook(job_id)
+    should_notify = notify_webhook and not job.get("suppress_webhook")
+    logger.debug(
+        "Job %s notification decision: notify_webhook=%s | suppress_webhook=%s | should_notify=%s",
+        job_id,
+        notify_webhook,
+        job.get("suppress_webhook"),
+        should_notify,
+    )
+    if should_notify:
+        _notify_webhook(job_id)
 
 
 def _split_into_chunks(text: str, chunk_size: int = 200) -> List[str]:
@@ -279,6 +294,7 @@ def _json_to_pdf(data: Dict) -> bytes:
 
     pdf = FPDF()
     pdf.add_page()
+    usable_width = getattr(pdf, "epw", pdf.w - pdf.l_margin - pdf.r_margin)
 
     font_path = os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans.ttf")
     unicode_font_loaded = False
@@ -288,7 +304,7 @@ def _json_to_pdf(data: Dict) -> bytes:
             pdf.set_font("DejaVu", size=12)
             unicode_font_loaded = True
             logger.debug("Loaded Unicode font from %s", font_path)
-        except (RuntimeError, TypeError, OSError) as exc:
+        except Exception as exc:  # pragma: no cover - depends on font availability
             logger.warning(
                 "Failed to load Unicode font at %s: %s. Falling back to Latin-1-safe font.",
                 font_path,
@@ -298,14 +314,35 @@ def _json_to_pdf(data: Dict) -> bytes:
         logger.warning("Unicode font file not found at %s. Falling back to Latin-1-safe font.", font_path)
 
     if not unicode_font_loaded:
-        pdf.set_font("Helvetica", size=12)
+        try:
+            pdf.set_font("helvetica", size=12)
+        except Exception as exc:  # pragma: no cover - depends on font availability
+            logger.warning(
+                "Failed to set helvetica font (%s). Falling back to courier.",
+                exc,
+            )
+            pdf.set_font("courier", size=12)
 
     json_str = json.dumps(data, indent=2, ensure_ascii=False)
     logger.debug("JSON converted to string with %d characters", len(json_str))
     for raw_line in json_str.splitlines():
         line = raw_line if unicode_font_loaded else _sanitize_for_latin1(raw_line)
-        pdf.multi_cell(0, 10, line)
-    pdf_bytes = pdf.output(dest="S").encode("latin-1")
+        try:
+            pdf.multi_cell(usable_width, 10, line)
+        except Exception as exc:  # pragma: no cover - depends on font availability
+            logger.warning(
+                "Unable to render line in single cell (len=%d): %s | falling back to wrapped chunks (%s)",
+                len(line),
+                line,
+                exc,
+            )
+            for chunk in textwrap.wrap(line, width=60) or [line]:
+                pdf.multi_cell(usable_width, 10, chunk)
+    pdf_raw = pdf.output(dest="S")
+    if isinstance(pdf_raw, (bytes, bytearray)):
+        pdf_bytes = bytes(pdf_raw)
+    else:
+        pdf_bytes = str(pdf_raw).encode("latin-1", errors="ignore")
     logger.info("Generated PDF with %d bytes from JSON", len(pdf_bytes))
     return pdf_bytes
 
@@ -751,9 +788,17 @@ def _process_invoice_parser(
         len(invoice_contents),
     )
     stage1_job = f"{job_id}_stage1"
-    jobs[stage1_job] = {"status": "pending", "result": None, "created_at": time.time()}
+    jobs[stage1_job] = {
+        "status": "pending",
+        "result": None,
+        "created_at": time.time(),
+        "suppress_webhook": True,
+    }
     _process_invoices_gpt_pdf(
-        stage1_job, packing_contents, invoice_contents, INVOICE_PARSER_STEP1_PROMPT
+        stage1_job,
+        packing_contents,
+        invoice_contents,
+        INVOICE_PARSER_STEP1_PROMPT,
     )
     stage1 = jobs.pop(stage1_job, None)
     if not stage1 or stage1.get("status") != "done":
