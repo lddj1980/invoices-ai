@@ -5,6 +5,7 @@ import logging
 import uuid
 import time
 import json
+import unicodedata
 import urllib.error
 import urllib.request
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks
@@ -116,7 +117,7 @@ def _notify_webhook(job_id: str) -> None:
         logger.warning("Job %s not found during webhook notification", job_id)
         return
 
-    external_job_id = job_id
+    external_job_id = job.get("external_job_id") or job_id
     status = job.get("status")
     logger.debug("Job %s current status: %s", job_id, status)
     if status == "done":
@@ -243,6 +244,30 @@ DEFAULT_PDF_FALLBACK_PROMPT_PREFIX = (
     "preco_unitario, moeda e total. Conteúdo:\n\n"
 )
 
+
+_LATIN1_REPLACEMENTS = {
+    ord("–"): "-",
+    ord("—"): "-",
+    ord("•"): "*",
+    ord("…"): "...",
+    ord("“"): '"',
+    ord("”"): '"',
+    ord("‘"): "'",
+    ord("’"): "'",
+}
+
+
+def _sanitize_for_latin1(text: str) -> str:
+    """Normalize text so it fits in Latin-1 when Unicode fonts are unavailable."""
+
+    normalized = unicodedata.normalize("NFKD", text)
+    replaced = normalized.translate(_LATIN1_REPLACEMENTS)
+    encoded = replaced.encode("latin-1", errors="ignore")
+    sanitized = encoded.decode("latin-1")
+    if sanitized != text:
+        logger.debug("Sanitized text for Latin-1 compatibility: '%s' -> '%s'", text, sanitized)
+    return sanitized
+
 def _json_to_pdf(data: Dict) -> bytes:
     """Convert a JSON-serializable object to PDF bytes."""
     logger.info("Converting JSON payload to PDF (keys=%s)", list(data)[:10])
@@ -256,15 +281,29 @@ def _json_to_pdf(data: Dict) -> bytes:
     pdf.add_page()
 
     font_path = os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans.ttf")
-    if not os.path.exists(font_path):
-        logger.error("Unicode font file not found at %s", font_path)
-        raise HTTPException(status_code=500, detail="Unicode font file not found")
+    unicode_font_loaded = False
+    if os.path.exists(font_path):
+        try:
+            pdf.add_font("DejaVu", "", font_path, uni=True)
+            pdf.set_font("DejaVu", size=12)
+            unicode_font_loaded = True
+            logger.debug("Loaded Unicode font from %s", font_path)
+        except (RuntimeError, TypeError, OSError) as exc:
+            logger.warning(
+                "Failed to load Unicode font at %s: %s. Falling back to Latin-1-safe font.",
+                font_path,
+                exc,
+            )
+    else:
+        logger.warning("Unicode font file not found at %s. Falling back to Latin-1-safe font.", font_path)
 
-    pdf.add_font("DejaVu", "", font_path, uni=True)
-    pdf.set_font("DejaVu", size=12)
+    if not unicode_font_loaded:
+        pdf.set_font("Helvetica", size=12)
+
     json_str = json.dumps(data, indent=2, ensure_ascii=False)
     logger.debug("JSON converted to string with %d characters", len(json_str))
-    for line in json_str.splitlines():
+    for raw_line in json_str.splitlines():
+        line = raw_line if unicode_font_loaded else _sanitize_for_latin1(raw_line)
         pdf.multi_cell(0, 10, line)
     pdf_bytes = pdf.output(dest="S").encode("latin-1")
     logger.info("Generated PDF with %d bytes from JSON", len(pdf_bytes))
