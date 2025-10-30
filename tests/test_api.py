@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 # Ensure project root on path
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from app.main import app, vector_store, DEFAULT_PDF_PROMPT, jobs
+from app.main import app, vector_store, DEFAULT_PDF_PROMPT, jobs, _finalize_job
 from app.prompts import (
     INVOICE_PARSER_STEP1_PROMPT,
     INVOICE_PARSER_STEP2_PROMPT,
@@ -353,3 +353,77 @@ def test_invoice_parser_pipeline(monkeypatch):
     assert body["result"] == "final"
     assert calls[0][1] == INVOICE_PARSER_STEP1_PROMPT
     assert calls[1][1] == INVOICE_PARSER_STEP2_PROMPT
+
+
+def test_invoices_gpt_pdf_triggers_webhook_on_success(monkeypatch):
+    client = TestClient(app)
+    jobs.clear()
+
+    dispatched = []
+
+    def capture_webhook(payload):
+        dispatched.append(payload)
+
+    monkeypatch.setattr("app.main._post_webhook", capture_webhook)
+
+    def fake_process(job_id, packing_contents, invoice_contents, prompt):
+        _finalize_job(job_id, "done", [{"PARTNUMBER": "ABC123"}])
+
+    monkeypatch.setattr("app.main._process_invoices_gpt_pdf", fake_process)
+
+    response = client.post(
+        "/invoices-gpt-pdf",
+        data={"external_job_id": "ext-123"},
+        files={
+            "packing_list": ("packing.pdf", PDF_WITH_TEXT, "application/pdf"),
+            "invoice": ("invoice.pdf", PDF_WITH_TEXT, "application/pdf"),
+        },
+    )
+
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+    assert jobs[job_id]["status"] == "done"
+    assert dispatched == [
+        {
+            "external_job_id": "ext-123",
+            "status": "completed",
+            "result": [{"PARTNUMBER": "ABC123"}],
+        }
+    ]
+
+
+def test_invoices_gpt_pdf_triggers_webhook_on_error(monkeypatch):
+    client = TestClient(app)
+    jobs.clear()
+
+    dispatched = []
+
+    def capture_webhook(payload):
+        dispatched.append(payload)
+
+    monkeypatch.setattr("app.main._post_webhook", capture_webhook)
+
+    def fake_process(job_id, packing_contents, invoice_contents, prompt):
+        _finalize_job(job_id, "error", "processing failed")
+
+    monkeypatch.setattr("app.main._process_invoices_gpt_pdf", fake_process)
+
+    response = client.post(
+        "/invoices-gpt-pdf",
+        data={"external_job_id": "ext-err"},
+        files={
+            "packing_list": ("packing.pdf", PDF_WITH_TEXT, "application/pdf"),
+            "invoice": ("invoice.pdf", PDF_WITH_TEXT, "application/pdf"),
+        },
+    )
+
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+    assert jobs[job_id]["status"] == "error"
+    assert dispatched == [
+        {
+            "external_job_id": "ext-err",
+            "status": "error",
+            "error_message": "processing failed",
+        }
+    ]
