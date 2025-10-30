@@ -5,6 +5,8 @@ import logging
 import uuid
 import time
 import json
+import urllib.error
+import urllib.request
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks
 from typing import Dict, List
 
@@ -40,7 +42,9 @@ app = FastAPI()
 
 # Simple in-memory job store for background processing results
 jobs: dict[str, dict] = {}
-JOBS_TTL_SECONDS = 3600
+# Jobs remain queryable for up to 24 hours before being purged from memory.
+JOBS_TTL_SECONDS = 24 * 60 * 60
+WEBHOOK_URL = "https://pemmlybnqjvpxmgzxqhl.supabase.co/functions/v1/webhook-invoice-result"
 
 
 def _cleanup_jobs() -> None:
@@ -49,6 +53,69 @@ def _cleanup_jobs() -> None:
     expired = [jid for jid, info in jobs.items() if now - info.get("created_at", now) > JOBS_TTL_SECONDS]
     for jid in expired:
         jobs.pop(jid, None)
+
+
+def _post_webhook(payload: dict) -> None:
+    """Send ``payload`` to the external webhook endpoint.
+
+    Errors are logged but do not raise exceptions so the background processing
+    flow is not interrupted.
+    """
+
+    data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        WEBHOOK_URL, data=data, headers={"Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10):  # nosec B310 - trusted URL
+            logger.debug("Webhook dispatched: %s", payload)
+    except urllib.error.URLError as exc:
+        logger.error("Failed to dispatch webhook: %s", exc)
+
+
+def _notify_webhook(job_id: str) -> None:
+    """Dispatch webhook notifications when a job finishes."""
+
+    job = jobs.get(job_id)
+    if not job:
+        return
+
+    external_job_id = job.get("external_job_id")
+    if not external_job_id:
+        return
+
+    status = job.get("status")
+    if status == "done":
+        payload = {
+            "external_job_id": external_job_id,
+            "status": "completed",
+            "result": job.get("result"),
+        }
+    elif status == "error":
+        error_message = job.get("result")
+        if error_message is None:
+            error_message = "Unknown error"
+        payload = {
+            "external_job_id": external_job_id,
+            "status": "error",
+            "error_message": error_message if isinstance(error_message, str) else str(error_message),
+        }
+    else:
+        return
+
+    _post_webhook(payload)
+
+
+def _finalize_job(job_id: str, status: str, result) -> None:
+    """Update job status/result and emit webhook notifications when required."""
+
+    job = jobs.get(job_id)
+    if job is None:
+        return
+
+    job["status"] = status
+    job["result"] = result
+    _notify_webhook(job_id)
 
 
 def _split_into_chunks(text: str, chunk_size: int = 200) -> List[str]:
@@ -299,6 +366,7 @@ async def invoice_json_gpt_pdf(
     packing_list: UploadFile = File(...),
     invoice: str = Form(...),
     prompt: str | None = Form(None),
+    external_job_id: str | None = Form(None),
 ):
     """Recebe um JSON de invoice e um PDF de packing list.
 
@@ -335,7 +403,12 @@ async def invoice_json_gpt_pdf(
     )
 
     job_id = str(uuid.uuid4())
-    jobs[job_id] = {"status": "pending", "result": None, "created_at": time.time()}
+    jobs[job_id] = {
+        "status": "pending",
+        "result": None,
+        "created_at": time.time(),
+        "external_job_id": external_job_id,
+    }
     _cleanup_jobs()
     background_tasks.add_task(
         _process_invoices_gpt_pdf, job_id, packing_contents, invoice_contents, prompt
@@ -349,6 +422,7 @@ async def invoices_gpt_pdf(
     packing_list: UploadFile = File(...),
     invoice: UploadFile = File(...),
     prompt: str | None = Form(None),
+    external_job_id: str | None = Form(None),
 ):
     """Agenda o processamento de dois PDFs e retorna um ``job_id`` para consulta."""
     logger.info(
@@ -371,7 +445,12 @@ async def invoices_gpt_pdf(
     )
 
     job_id = str(uuid.uuid4())
-    jobs[job_id] = {"status": "pending", "result": None, "created_at": time.time()}
+    jobs[job_id] = {
+        "status": "pending",
+        "result": None,
+        "created_at": time.time(),
+        "external_job_id": external_job_id,
+    }
     _cleanup_jobs()
     background_tasks.add_task(
         _process_invoices_gpt_pdf, job_id, packing_contents, invoice_contents, prompt
@@ -388,15 +467,13 @@ def _process_invoices_gpt_pdf(
     """Executa o processamento pesado e armazena o resultado em ``jobs``."""
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        jobs[job_id]["status"] = "error"
-        jobs[job_id]["result"] = "OPENAI_API_KEY is not set"
+        _finalize_job(job_id, "error", "OPENAI_API_KEY is not set")
         return
 
     try:
         from openai import OpenAI
     except Exception:
-        jobs[job_id]["status"] = "error"
-        jobs[job_id]["result"] = "openai package is not installed"
+        _finalize_job(job_id, "error", "openai package is not installed")
         return
 
     client = OpenAI(api_key=api_key, timeout=20 * 60)
@@ -467,8 +544,7 @@ def _process_invoices_gpt_pdf(
             uploaded_ids = {}
         except Exception as exc_inner:
             logger.error("Fallback local extraction also failed: %s", exc_inner)
-            jobs[job_id]["status"] = "error"
-            jobs[job_id]["result"] = str(exc_inner)
+            _finalize_job(job_id, "error", str(exc_inner))
             return
     finally:
         for fid in uploaded_ids.values():
@@ -477,8 +553,11 @@ def _process_invoices_gpt_pdf(
             except Exception as exc_del:
                 logger.warning("Failed to delete OpenAI file %s: %s", fid, exc_del)
 
-    jobs[job_id]["result"] = {"file_ids": uploaded_ids or None, "result": result_text}
-    jobs[job_id]["status"] = "done"
+    _finalize_job(
+        job_id,
+        "done",
+        {"file_ids": uploaded_ids or None, "result": result_text},
+    )
 
 
 def _process_invoice_parser(
@@ -499,8 +578,7 @@ def _process_invoice_parser(
     )
     stage1 = jobs.pop(stage1_job, None)
     if not stage1 or stage1.get("status") != "done":
-        jobs[job_id]["status"] = "error"
-        jobs[job_id]["result"] = stage1.get("result") if stage1 else None
+        _finalize_job(job_id, "error", stage1.get("result") if stage1 else None)
         return
 
     result_text = stage1.get("result")
@@ -509,19 +587,16 @@ def _process_invoice_parser(
     try:
         invoice_json = json.loads(result_text)
     except Exception:
-        jobs[job_id]["status"] = "error"
-        jobs[job_id]["result"] = "Invalid JSON from stage 1"
+        _finalize_job(job_id, "error", "Invalid JSON from stage 1")
         return
 
     try:
         invoice_pdf = _json_to_pdf(invoice_json)
     except HTTPException as exc:
-        jobs[job_id]["status"] = "error"
-        jobs[job_id]["result"] = exc.detail
+        _finalize_job(job_id, "error", exc.detail)
         return
     except Exception as exc:  # pragma: no cover
-        jobs[job_id]["status"] = "error"
-        jobs[job_id]["result"] = str(exc)
+        _finalize_job(job_id, "error", str(exc))
         return
 
     _process_invoices_gpt_pdf(
@@ -534,6 +609,7 @@ async def invoice_parser(
     background_tasks: BackgroundTasks,
     packing_list: UploadFile = File(...),
     invoice: UploadFile = File(...),
+    external_job_id: str | None = Form(None),
 ):
     """Execute the two-step invoice parsing pipeline.
 
@@ -549,7 +625,12 @@ async def invoice_parser(
     invoice_contents = await invoice.read()
 
     job_id = str(uuid.uuid4())
-    jobs[job_id] = {"status": "pending", "result": None, "created_at": time.time()}
+    jobs[job_id] = {
+        "status": "pending",
+        "result": None,
+        "created_at": time.time(),
+        "external_job_id": external_job_id,
+    }
     _cleanup_jobs()
     background_tasks.add_task(
         _process_invoice_parser, job_id, packing_contents, invoice_contents
