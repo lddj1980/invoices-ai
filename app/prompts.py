@@ -47,9 +47,12 @@ INVOICE_PARSER_STEP1_PROMPT = (
 - O exportador é a parte que vende ou envia os produtos. Procure cabeçalhos ou rótulos como "Exporter", "Exportador", "Supplier" ou "Seller". Não confunda com o consignatário ou importador.
 - O fabricante é a parte que produziu os produtos. Procure termos como "Manufacturer", "Fabricante", "Made by" ou "Produced by".
 - Se a invoice indicar explicitamente que o exportador também é o fabricante, marque "EXPORTADOR É O FABRICANTE?" = true.
-- Além disso, identifique o país de origem de cada produto com base em linhas contendo **"ORIGIN:"** seguidas de um código ISO ou nome de país (ex.: "ORIGIN: SE", "ORIGIN: DE", "ORIGIN: FR", "ORIGIN: IT", "ORIGIN: NL").  
-  - Use essa informação para preencher o campo **"PAIS DO FABRICANTE"** → {"code": <string>} de acordo com a tabela TAB-PAISES.  
-  - Caso múltiplas origens apareçam na mesma invoice, associe cada uma à respectiva linha do produto.  
+### IDENTIFICAÇÃO DO PAÍS DO FABRICANTE
+- Identifique o país de origem de cada produto com base em linhas contendo **"ORIGIN:"** seguidas de um código ISO ou nome de país (ex.: "ORIGIN: SE", "ORIGIN: DE", "ORIGIN: FR", "ORIGIN: IT", "ORIGIN: NL").
+- Quando houver coluna ou rótulo "ORIGIN" seguido de um código ISO-2, considere-o como o país de fabricação daquele item.
+- Sempre converta esses códigos para o código oficial da TAB-PAISES.
+  - Use essa informação para preencher o campo **"PAIS DO FABRICANTE"** → {"code": <string>} de acordo com a tabela TAB-PAISES.
+  - Caso múltiplas origens apareçam na mesma invoice, associe cada uma à respectiva linha do produto.
   - Se o país de origem não estiver presente, use "N/D".
 ### IDENTIFICAÇÃO DA CONDIÇÃO DE VENDA (INCOTERM)
 - Analise a seção comercial da invoice (geralmente próxima a valores totais, cabeçalhos "Terms", "Conditions", "Sale Terms" ou "Incoterm").
