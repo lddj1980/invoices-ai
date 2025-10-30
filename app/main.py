@@ -229,7 +229,14 @@ def _json_to_pdf(data: Dict) -> bytes:
 
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", size=12)
+
+    font_path = os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans.ttf")
+    if not os.path.exists(font_path):
+        logger.error("Unicode font file not found at %s", font_path)
+        raise HTTPException(status_code=500, detail="Unicode font file not found")
+
+    pdf.add_font("DejaVu", "", font_path, uni=True)
+    pdf.set_font("DejaVu", size=12)
     json_str = json.dumps(data, indent=2, ensure_ascii=False)
     logger.debug("JSON converted to string with %d characters", len(json_str))
     for line in json_str.splitlines():
