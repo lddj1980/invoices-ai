@@ -47,7 +47,8 @@ app = FastAPI()
 
 # Simple in-memory job store for background processing results
 jobs: dict[str, dict] = {}
-JOBS_TTL_SECONDS = 3600
+# Jobs remain queryable for up to 24 hours before being purged from memory.
+JOBS_TTL_SECONDS = 24 * 60 * 60
 WEBHOOK_URL = "https://pemmlybnqjvpxmgzxqhl.supabase.co/functions/v1/webhook-invoice-result"
 
 
